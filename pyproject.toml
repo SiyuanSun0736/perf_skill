@@ -9,7 +9,7 @@ description = "Declarative Linux PMU observation on top of perf stat"
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [
-  { name = "GitHub Copilot" }
+  { name = "SunSiyuan0736" }
 ]
 keywords = ["perf", "pmu", "profiling", "linux", "observability"]
 classifiers = [
