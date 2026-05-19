@@ -158,7 +158,7 @@ pip install dist/perf_skill-*.whl
 .github/workflows/release.yml
 ```
 
-推送类似 `v0.5.0` 这样的 tag 时，workflow 会执行：
+推送类似 `v0.5.1` 这样的 tag 时，workflow 会执行：
 
 - 构建 wheel 和 sdist
 - 校验 tag 与 `perf_skill.__version__` 是否一致
@@ -189,8 +189,8 @@ PUBLISH_PYPI=true
 也可以本地手动运行这两个发布脚本：
 
 ```bash
-PYTHONPATH=src python3 scripts/release/validate_tag.py v0.5.0
-PYTHONPATH=src python3 scripts/release/generate_changelog.py --tag v0.5.0 --output /tmp/release-notes.md
+PYTHONPATH=src python3 scripts/release/validate_tag.py v0.5.1
+PYTHONPATH=src python3 scripts/release/generate_changelog.py --tag v0.5.1 --output /tmp/release-notes.md
 ```
 
 ## 注意事项
