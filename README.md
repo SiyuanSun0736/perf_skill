@@ -135,8 +135,25 @@ pip install dist/perf_skill-*.whl
 
 This repository includes a tag-driven GitHub Actions workflow at
 `.github/workflows/release.yml`. Pushing a tag such as `v0.5.0` builds the wheel
-and sdist, uploads them as workflow artifacts, and attaches them to a GitHub
-release.
+and sdist, validates that the tag matches the package version, generates a
+changelog from commits since the previous tag, uploads the built artifacts, and
+attaches them to a GitHub release.
+
+The release workflow uses:
+
+- `scripts/release/validate_tag.py` to assert `vX.Y.Z` matches `perf_skill.__version__`
+- `scripts/release/generate_changelog.py` to build release notes from the git history between tags
+
+To enable PyPI publishing, configure a trusted publisher for this repository on
+PyPI and set the repository variable `PUBLISH_PYPI=true`. The workflow will then
+publish the same `dist/` artifacts to PyPI after a tagged release build.
+
+You can also run the release helpers locally:
+
+```bash
+PYTHONPATH=src python3 scripts/release/validate_tag.py v0.5.0
+PYTHONPATH=src python3 scripts/release/generate_changelog.py --tag v0.5.0 --output /tmp/release-notes.md
+```
 
 ## Notes
 
