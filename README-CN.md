@@ -171,6 +171,13 @@ pip install dist/perf_skill-*.whl
 - `scripts/release/validate_tag.py`：校验 `vX.Y.Z` 与包版本一致
 - `scripts/release/generate_changelog.py`：根据 tag 区间生成 release notes
 
+如果你想在打 tag 之前批量更新仓库里的当前版本引用，可以直接运行：
+
+```bash
+python3 scripts/release/bump_version.py 0.6.0 --dry-run
+python3 scripts/release/bump_version.py 0.6.0
+```
+
 如果你想开启 PyPI 发布，需要先在 PyPI 上把这个仓库配置成 trusted publisher，并设置仓库变量：
 
 ```text

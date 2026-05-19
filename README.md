@@ -149,6 +149,13 @@ The release workflow uses:
 - `scripts/release/validate_tag.py` to assert `vX.Y.Z` matches `perf_skill.__version__`
 - `scripts/release/generate_changelog.py` to build release notes from the git history between tags
 
+If you want to bump the package version references before tagging, use:
+
+```bash
+python3 scripts/release/bump_version.py 0.6.0 --dry-run
+python3 scripts/release/bump_version.py 0.6.0
+```
+
 To enable PyPI publishing, configure a trusted publisher for this repository on
 PyPI and set the repository variable `PUBLISH_PYPI=true`. The workflow will then
 publish the same `dist/` artifacts to PyPI after a tagged release build.

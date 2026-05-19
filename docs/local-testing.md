@@ -181,6 +181,13 @@ PYTHONPATH=src python3 -m perf_skill observe "trace pid=$pid branch-misses cache
 
 ## 7. 验证 release 辅助脚本
 
+如果你要准备一个新版本，可以先批量更新仓库里的当前版本引用：
+
+```bash
+python3 scripts/release/bump_version.py 0.6.0 --dry-run
+python3 scripts/release/bump_version.py 0.6.0
+```
+
 校验 tag 和版本号是否一致：
 
 ```bash
