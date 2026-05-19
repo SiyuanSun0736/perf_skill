@@ -32,8 +32,10 @@ perf-skill observe "trace comm=python pid=4242 inst cycles"
 
 For editable local development, use `pip install -e .[dev]` instead.
 
-Use `--dry-run` first if you want to inspect the resolved request and generated
-`perf` command without attaching to the process.
+Use `--dry-run` first if you want a simulated preview of the resolved request and
+generated `perf` command without attaching to the process. This preview is
+implemented by `perf-skill`; native `perf` does not provide a `--dry-run`
+option.
 
 ```bash
 perf-skill observe "trace python 4242 inst" --dry-run
@@ -43,6 +45,33 @@ By default, the CLI uses `--group-mode auto` and emits `perf stat -e` groups suc
 as `{instructions,cycles,cache-misses}` or
 `{instructions,cycles},{branches,branch-misses}`. This keeps related counters in
 the same perf group without forcing everything into one oversized event set.
+
+You can stop a live run after either a fixed sample count or a fixed duration:
+
+```bash
+perf-skill observe "trace pid=4242 inst cycles" --samples 10 --plain
+perf-skill observe "trace pid=4242 inst cycles" --seconds 5 --plain
+```
+
+The statement parser also understands short natural-language hints such as
+`for 5 seconds`, `10 samples`, `10秒`, `采样10次`, `持续 30 秒`, or
+`采 20 个样本`.
+
+If the statement asks to generate an image or chart, the CLI also enables SVG
+export automatically and picks a default path under `out/`, for example:
+
+```bash
+perf-skill observe "探测20秒node的cycles并生成图像"
+perf-skill observe "生成10s内node的branchs的图像"
+```
+
+If you only want to inspect available events, use `perf list` through the CLI:
+
+```bash
+perf-skill events
+perf-skill events cache
+perf-skill observe "show cache events"
+```
 
 Use `--group-mode off` if you want the raw ungrouped event list, or
 `--group-mode always` if you want every event list chunked into groups.
@@ -71,7 +100,19 @@ The parser is intentionally narrow and predictable.
 
 - `trace comm=python pid=4242 inst cycles`
 - `observe python 4242 instructions`
+- `observe node instructions`
+- `trace pid=4242 inst cycles for 5 seconds`
+- `observe pid=4242 cache-misses 10 samples`
 - `追踪 comm=nginx pid=31337 inst cycles`
+- `追踪 node 的 指令 和 周期`
+- `我要追踪node20秒内的cycles`
+- `探测20秒node的cycles并生成图像`
+- `生成10s内node的branchs的图像`
+- `追踪 pid=31337 的 inst 和 cycles，采样10次`
+- `追踪 node 持续 30 秒，采 20 个样本`
+- `列出 branch 相关事件`
+- `支持哪些 PMU 事件`
+- `查看 cache 相关事件`
 - `watch pid 9001 events=inst,cycles,cache-misses`
 
 Recognized target keys:
@@ -204,5 +245,8 @@ bash .github/skills/hardware-event-observe/scripts/run-observe.sh \
 ```
 
 The script keeps the invocation inside this repository and uses `python3` with
-`PYTHONPATH=src`, which matches the environment validated in this workspace.
+an auto-bootstrapped virtual environment under `~/.openclaw/perf-skill/venv`.
+On the first run, it creates that environment and installs this repository in
+editable mode with its Python dependencies. You can override the install path
+with `OPENCLAW_HOME`, `PERF_SKILL_HOME`, or `PERF_SKILL_VENV_DIR`.
 

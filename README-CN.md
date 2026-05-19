@@ -33,7 +33,7 @@ perf-skill observe "trace comm=python pid=4242 inst cycles"
 pip install -e .[dev]
 ```
 
-第一次使用建议先跑 `--dry-run`，先看解析结果和生成的 `perf` 命令，再决定是否真正附着到目标进程。
+第一次使用建议先跑 `--dry-run`，先看解析结果和生成的 `perf` 命令，再决定是否真正附着到目标进程。这里的 dry-run 是 `perf-skill` 自己做的模拟预览，原生 `perf` 并没有 `--dry-run` 选项。
 
 ```bash
 perf-skill observe "trace python 4242 inst" --dry-run
@@ -45,6 +45,30 @@ perf-skill observe "trace python 4242 inst" --dry-run
 - `{instructions,cycles},{branches,branch-misses}`
 
 这样能尽量把相关计数器放在同一个 perf group 中，而不是把所有事件都硬塞进一个过大的集合。
+
+如果你想按固定样本数或固定时长停止采样，可以用：
+
+```bash
+perf-skill observe "trace pid=4242 inst cycles" --samples 10 --plain
+perf-skill observe "trace pid=4242 inst cycles" --seconds 5 --plain
+```
+
+statement 里也支持更自然一点的写法，比如 `for 5 seconds`、`10 samples`、`10秒`、`采样10次`、`持续 30 秒`、`采 20 个样本`。
+
+如果 statement 里明确说了“生成图像/图表”，CLI 还会自动打开 SVG 导出，并在你没传 `--svg-out` 时默认写到 `out/*.svg`，例如：
+
+```bash
+perf-skill observe "探测20秒node的cycles并生成图像"
+perf-skill observe "生成10s内node的branchs的图像"
+```
+
+如果只是想先看当前机器支持哪些事件，可以直接走 `perf list`：
+
+```bash
+perf-skill events
+perf-skill events cache
+perf-skill observe "查看 cache 相关事件"
+```
 
 如果你想关闭分组，可以用：
 
@@ -85,7 +109,19 @@ perf-skill observe --help
 
 - `trace comm=python pid=4242 inst cycles`
 - `observe python 4242 instructions`
+- `observe node instructions`
+- `trace pid=4242 inst cycles for 5 seconds`
+- `observe pid=4242 cache-misses 10 samples`
 - `追踪 comm=nginx pid=31337 inst cycles`
+- `追踪 node 的 指令 和 周期`
+- `我要追踪node20秒内的cycles`
+- `探测20秒node的cycles并生成图像`
+- `生成10s内node的branchs的图像`
+- `追踪 pid=31337 的 inst 和 cycles，采样10次`
+- `追踪 node 持续 30 秒，采 20 个样本`
+- `列出 branch 相关事件`
+- `支持哪些 PMU 事件`
+- `查看 cache 相关事件`
 - `watch pid 9001 events=inst,cycles,cache-misses`
 
 支持的目标键：
@@ -233,4 +269,4 @@ bash .github/skills/hardware-event-observe/scripts/run-observe.sh \
   "trace pid=16874 inst cycles" --samples 5 --plain
 ```
 
-脚本会确保调用发生在当前仓库根目录下，并使用 `python3` 配合 `PYTHONPATH=src`，这与当前工作区里已经验证过的运行方式保持一致。
+脚本会确保调用发生在当前仓库根目录下，并在首次运行时自动把运行环境安装到 `~/.openclaw/perf-skill/venv`。它会以 editable 模式安装当前仓库和所需 Python 依赖，因此仓库里的后续代码修改会直接生效。如果你需要统一改安装位置，可以设置 `OPENCLAW_HOME`、`PERF_SKILL_HOME` 或 `PERF_SKILL_VENV_DIR`。

@@ -4,7 +4,7 @@ import unittest
 from unittest.mock import patch
 
 from perf_skill.models import ObservationRequest, PerfSample, PerfStatError, TargetProcess
-from perf_skill.perf import build_perf_command, build_retry_plans, format_retry_plan, parse_perf_csv_line, parse_perf_status_line, plan_event_groups, stream_perf_samples
+from perf_skill.perf import build_perf_command, build_retry_plans, detect_pmu_slot_limit, format_retry_plan, parse_perf_csv_line, parse_perf_status_line, plan_event_groups, stream_perf_samples
 
 
 class PerfHelpersTest(unittest.TestCase):
@@ -88,6 +88,34 @@ class PerfHelpersTest(unittest.TestCase):
             ),
         )
 
+    def test_detect_pmu_slot_limit_defaults_to_four(self) -> None:
+        self.assertEqual(detect_pmu_slot_limit(), 4)
+
+    def test_plan_event_groups_ignores_software_and_tracepoint_slot_cost(self) -> None:
+        groups = plan_event_groups(
+            (
+                "instructions",
+                "cycles",
+                "cache-references",
+                "cache-misses",
+                "cpu-clock",
+                "sched:sched_switch",
+                "branches",
+                "branch-misses",
+            ),
+            group_mode="auto",
+            pmu_slots=4,
+        )
+
+        self.assertEqual(
+            groups,
+            (
+                ("instructions", "cycles", "cpu-clock", "sched:sched_switch"),
+                ("branches", "branch-misses"),
+                ("cache-references", "cache-misses"),
+            ),
+        )
+
     def test_parse_perf_csv_line(self) -> None:
         measurement = parse_perf_csv_line(
             "1.000123,123456,,instructions,100.00,",
@@ -109,6 +137,17 @@ class PerfHelpersTest(unittest.TestCase):
         assert status is not None
         self.assertEqual(status.event, "cycles")
         self.assertEqual(status.status, "not counted")
+
+    def test_parse_perf_csv_line_matches_tracepoint_event(self) -> None:
+        measurement = parse_perf_csv_line(
+            "1.500000,7,,sched:sched_switch,100.00,",
+            ("instructions", "cycles", "sched:sched_switch"),
+        )
+
+        self.assertIsNotNone(measurement)
+        assert measurement is not None
+        self.assertEqual(measurement.event, "sched:sched_switch")
+        self.assertEqual(measurement.value, 7.0)
 
     def test_build_retry_plans(self) -> None:
         plans = build_retry_plans(group_mode="auto", pmu_slots=4, retry_grouping=True)

@@ -79,6 +79,19 @@ GROUP_FAMILIES: tuple[tuple[str, ...], ...] = (
 )
 GROUP_MODES = {"auto", "always", "off"}
 DEFAULT_GROUP_SIZE = 4
+SOFTWARE_EVENTS = {
+    "alignment-faults",
+    "bpf-output",
+    "context-switches",
+    "cpu-clock",
+    "cpu-migrations",
+    "dummy",
+    "emulation-faults",
+    "major-faults",
+    "minor-faults",
+    "page-faults",
+    "task-clock",
+}
 AMD_DEFAULT_GROUP_SIZE = 6
 PMU_COUNTER_HINT_PATHS = (
     Path("/sys/bus/event_source/devices/cpu/caps/num_counters"),
@@ -458,10 +471,9 @@ def parse_perf_csv_line(line: str, known_events: Iterable[str]) -> PerfMeasureme
     if value is None:
         return None
 
-    known = {event for event in known_events}
     for part in parts[2:]:
-        event_name = normalize_event_name(part)
-        if event_name is not None and event_name in known:
+        event_name = _match_known_event_name(part, known_events)
+        if event_name is not None:
             return PerfMeasurement(timestamp_sec=timestamp, event=event_name, value=value)
     return None
 
@@ -479,10 +491,9 @@ def parse_perf_status_line(line: str, known_events: Iterable[str]) -> PerfStatus
     if status not in {"<not counted>", "<not supported>", "not counted", "not supported"}:
         return None
 
-    known = {event for event in known_events}
     for part in parts[2:]:
-        event_name = normalize_event_name(part)
-        if event_name is not None and event_name in known:
+        event_name = _match_known_event_name(part, known_events)
+        if event_name is not None:
             return PerfStatus(timestamp_sec=timestamp, event=event_name, status=status.strip("<>"))
     return None
 
@@ -569,18 +580,6 @@ def _plan_group_retry(
 
 @lru_cache(maxsize=1)
 def detect_pmu_slot_limit() -> int:
-    for path in PMU_COUNTER_HINT_PATHS:
-        value = _read_positive_int(path)
-        if value is not None:
-            return value
-
-    cpuinfo = _read_cpuinfo_fields()
-    vendor = cpuinfo.get("vendor_id", "")
-    family = _try_parse_int(cpuinfo.get("cpu family"))
-    if vendor == "AuthenticAMD" and family is not None and family >= 23:
-        return AMD_DEFAULT_GROUP_SIZE
-    if vendor == "GenuineIntel":
-        return DEFAULT_GROUP_SIZE
     return DEFAULT_GROUP_SIZE
 
 
@@ -603,8 +602,14 @@ def _chunk_groups(
     max_group_size: int,
 ) -> tuple[tuple[str, ...], ...]:
     groups: list[tuple[str, ...]] = []
-    for index in range(0, len(ordered_events), max_group_size):
-        groups.append(ordered_events[index:index + max_group_size])
+    current_group: list[str] = []
+    for event in ordered_events:
+        if current_group and not _can_append_event(current_group, event, max_group_size=max_group_size):
+            groups.append(tuple(current_group))
+            current_group = []
+        current_group.append(event)
+    if current_group:
+        groups.append(tuple(current_group))
     return tuple(groups)
 
 
@@ -626,7 +631,7 @@ def _plan_auto_groups(
 
     for event in remaining:
         for group in groups:
-            if len(group) < max_group_size:
+            if _can_append_event(group, event, max_group_size=max_group_size):
                 group.append(event)
                 break
         else:
@@ -649,7 +654,7 @@ def _merge_singleton_groups(
     for group in groups[1:]:
         if len(group) == 1:
             for target_group in merged_groups:
-                if len(target_group) < max_group_size:
+                if _can_append_group(target_group, group, max_group_size=max_group_size):
                     target_group.extend(group)
                     break
             else:
@@ -666,11 +671,10 @@ def _split_oversized_groups(
 ) -> list[list[str]]:
     split_groups: list[list[str]] = []
     for group in groups:
-        if len(group) <= max_group_size:
+        if _group_slot_cost(group) <= max_group_size:
             split_groups.append(list(group))
             continue
-        for index in range(0, len(group), max_group_size):
-            split_groups.append(group[index:index + max_group_size])
+        split_groups.extend(list(chunk) for chunk in _chunk_groups(tuple(group), max_group_size=max_group_size))
     return split_groups
 
 
@@ -749,6 +753,60 @@ def _summarize_retry_reason(error: PerfStatError) -> str:
 
 def _describe_group(group: tuple[str, ...]) -> str:
     return ", ".join(group)
+
+
+def _match_known_event_name(raw_event: str, known_events: Iterable[str]) -> str | None:
+    known = tuple(dict.fromkeys(known_events))
+    raw_cleaned = raw_event.strip().lower()
+    cleaned = raw_cleaned.replace("_", "-")
+    if not cleaned:
+        return None
+
+    normalized_event = normalize_event_name(raw_cleaned)
+    if normalized_event is not None and normalized_event in known:
+        return normalized_event
+
+    if raw_cleaned in known:
+        return raw_cleaned
+
+    if cleaned in known:
+        return cleaned
+
+    for event in known:
+        if ":" in event and (raw_cleaned.startswith(f"{event}:") or cleaned.startswith(f"{event}:")):
+            return event
+        if ":" not in event and ":" in raw_cleaned and raw_cleaned.rsplit(":", maxsplit=1)[0] == event:
+            return event
+        if ":" not in event and ":" in cleaned and cleaned.rsplit(":", maxsplit=1)[0] == event:
+            return event
+    return None
+
+
+def _group_slot_cost(group: Iterable[str]) -> int:
+    return sum(_event_slot_cost(event) for event in group)
+
+
+def _can_append_event(group: Iterable[str], event: str, *, max_group_size: int) -> bool:
+    return _group_slot_cost(group) + _event_slot_cost(event) <= max_group_size
+
+
+def _can_append_group(target_group: Iterable[str], source_group: Iterable[str], *, max_group_size: int) -> bool:
+    return _group_slot_cost(target_group) + _group_slot_cost(source_group) <= max_group_size
+
+
+def _event_slot_cost(event: str) -> int:
+    cleaned = event.strip().lower().replace("_", "-")
+    if not cleaned:
+        return 0
+    if cleaned in SOFTWARE_EVENTS:
+        return 0
+    if cleaned.startswith("software:") or cleaned.startswith("tracepoint:"):
+        return 0
+    if ":" in cleaned:
+        base_event = cleaned.split(":", maxsplit=1)[0]
+        if normalize_event_name(base_event) is None:
+            return 0
+    return 1
 
 
 def _add_partial_sample(
