@@ -1,5 +1,7 @@
 # perf-skill
 
+[English](./README.md) | [简体中文](./README-CN.md)
+
 perf-skill is a Linux CLI that turns a short declarative statement into a
 ready-to-run `perf stat` session. It resolves the target process, enables sane
 defaults for PMU collection, and streams a small terminal dashboard with IPC and
