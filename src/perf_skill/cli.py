@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime
 from pathlib import Path
 import shlex
 import subprocess
@@ -9,9 +10,9 @@ import time
 
 from perf_skill import __version__
 from perf_skill.export import CsvSampleWriter, write_svg_report
-from perf_skill.models import ObservationError, PerfSample, PerfStatError
+from perf_skill.models import ObservationError, PerfSample, PerfStatError, TargetProcess
 from perf_skill.parser import build_request, parse_observation_statement
-from perf_skill.perf import build_perf_command, build_retry_plans, detect_pmu_slot_limit, format_retry_plan, plan_event_groups, stream_perf_samples
+from perf_skill.perf import build_perf_command, build_perf_record_command, build_perf_script_command, build_retry_plans, detect_pmu_slot_limit, format_retry_plan, plan_event_groups, stream_perf_samples
 from perf_skill.processes import resolve_target
 from perf_skill.ui import DashboardRenderer
 
@@ -23,6 +24,9 @@ class HelpFormatter(argparse.ArgumentDefaultsHelpFormatter, argparse.RawDescript
 ROOT_EPILOG = """Examples:
     perf-skill observe \"trace pid=4242 inst cycles\" --dry-run
     perf-skill observe \"追踪 node 的 指令 和 周期\" --plain
+    perf-skill observe \"追踪 node 的 cpu-clock 和 sched:sched_switch\" --plain
+    perf-skill observe \"追踪 node 的 cycles 并输出 perf.data\" --seconds 10
+    perf-skill observe \"解析 out/node_targetpid4242_cycles_data_20260519T120000.data\"
     perf-skill observe \"trace pid=4242 inst cycles for 5 seconds\" --plain
     perf-skill observe \"我要追踪node20秒内的cycles\" --plain
     perf-skill observe \"探测20秒node的cycles并生成图像\"
@@ -37,6 +41,9 @@ Use 'perf-skill observe --help' for observe-specific examples and advanced group
 OBSERVE_EPILOG = """Examples:
     perf-skill observe \"trace pid=4242 inst cycles\" --dry-run
     perf-skill observe \"追踪 node 的 指令 和 周期\" --plain
+    perf-skill observe \"追踪 node 的 cpu-clock 和 sched:sched_switch\" --plain
+    perf-skill observe \"追踪 node 的 cycles 并输出 perf.data\" --seconds 10
+    perf-skill observe \"解析 out/node_targetpid4242_cycles_data_20260519T120000.data\"
     perf-skill observe \"trace pid=4242 inst cycles for 5 seconds\" --plain
     perf-skill observe \"我要追踪node20秒内的cycles\" --plain
     perf-skill observe \"探测20秒node的cycles并生成图像\"
@@ -48,6 +55,7 @@ OBSERVE_EPILOG = """Examples:
 
 Grouping behavior:
     - auto: keep related counters together and split only failing groups on retry
+    - auto also prefers similar event names, such as shared prefixes or suffixes
     - always: chunk the full event set by PMU slot count
     - off: disable perf groups entirely
 """
@@ -150,7 +158,7 @@ def _build_parser() -> argparse.ArgumentParser:
     observe_parser.add_argument(
         "--pmu-slots",
         default="auto",
-        help="PMU slot limit for group splitting; use 'auto' to read local hints and vendor heuristics before adaptive retries",
+        help="PMU slot limit for grouped hardware counters; use 'auto' for the default 4 hardware slots, while software and tracepoint events do not consume those slots",
     )
     observe_parser.add_argument(
         "--csv-out",
@@ -159,6 +167,14 @@ def _build_parser() -> argparse.ArgumentParser:
     observe_parser.add_argument(
         "--svg-out",
         help="write a stacked SVG time-series report after sampling finishes",
+    )
+    observe_parser.add_argument(
+        "--data-out",
+        help="write perf record output to a .data file; when omitted for perf.data requests, a default out/comm_targetpid_event_data_time.data path is used",
+    )
+    observe_parser.add_argument(
+        "--data-in",
+        help="parse an existing .data file with perf script instead of live sampling",
     )
     observe_parser.add_argument(
         "--svg-legend",
@@ -198,6 +214,9 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _handle_observe(args: argparse.Namespace) -> int:
+    if args.data_in and args.data_out:
+        raise ObservationError("data-in and data-out cannot be used together")
+
     parsed = parse_observation_statement(args.statement)
     effective_dry_run = args.dry_run or parsed.wants_dry_run
     effective_samples = _resolve_limit(args.samples, parsed.sample_count, label="samples")
@@ -206,9 +225,13 @@ def _handle_observe(args: argparse.Namespace) -> int:
         tuple(args.events.split(",")) if args.events else (),
         parsed.event_filters,
     )
+    effective_data_in = _resolve_data_in(args.data_in, parsed=parsed)
 
     if parsed.wants_event_list:
         return _handle_event_listing(event_filters, dry_run=effective_dry_run)
+
+    if effective_data_in is not None:
+        return _handle_perf_data_parse(effective_data_in, dry_run=effective_dry_run)
 
     extra_events = args.events.split(",") if args.events else None
     pmu_slots = _parse_pmu_slots_arg(args.pmu_slots)
@@ -224,22 +247,35 @@ def _handle_observe(args: argparse.Namespace) -> int:
     )
     target = resolve_target(request)
     effective_svg_out = _resolve_svg_out(args.svg_out, request, target, parsed=parsed)
+    effective_data_out = _resolve_data_out(args.data_out, request, target, parsed=parsed)
     retry_plans = build_retry_plans(
         group_mode=args.group_mode,
         pmu_slots=pmu_slots,
         retry_grouping=args.group_retry,
-    )
-    command = build_perf_command(
-        request,
-        target,
-        group_mode=args.group_mode,
-        pmu_slots=pmu_slots,
     )
     event_groups = plan_event_groups(
         request.events,
         group_mode=args.group_mode,
         pmu_slots=pmu_slots,
     )
+    if effective_data_out is not None:
+        command = build_perf_record_command(
+            request,
+            target,
+            output_path=effective_data_out,
+            duration_sec=effective_seconds,
+            group_mode=args.group_mode,
+            pmu_slots=pmu_slots,
+            groups=event_groups,
+        )
+    else:
+        command = build_perf_command(
+            request,
+            target,
+            group_mode=args.group_mode,
+            pmu_slots=pmu_slots,
+            groups=event_groups,
+        )
 
     if effective_dry_run:
         print("preview   : simulated dry-run only; perf itself has no --dry-run option")
@@ -258,9 +294,27 @@ def _handle_observe(args: argparse.Namespace) -> int:
             print(f"samples   : {effective_samples}")
         if effective_seconds is not None:
             print(f"seconds   : {effective_seconds}")
+        if effective_data_out is not None:
+            print(f"data-out  : {effective_data_out}")
         if effective_svg_out is not None:
             print(f"svg-out   : {effective_svg_out}")
         print(f"command   : {shlex.join(command)}")
+        return 0
+
+    if effective_data_out is not None:
+        if effective_samples is not None:
+            raise ObservationError("perf.data recording does not support sample-count limits; use --seconds or stop it manually")
+        if args.csv_out:
+            raise ObservationError("csv-out cannot be combined with perf.data recording")
+        if effective_svg_out is not None:
+            raise ObservationError("svg-out cannot be combined with perf.data recording")
+
+        data_out_path = Path(effective_data_out)
+        data_out_path.parent.mkdir(parents=True, exist_ok=True)
+        output = _run_command(command)
+        if output:
+            print(output)
+        print(f"data-out  : {effective_data_out}")
         return 0
 
     renderer = DashboardRenderer(request, target, plain_output=args.plain)
@@ -292,7 +346,9 @@ def _handle_observe(args: argparse.Namespace) -> int:
     except KeyboardInterrupt:
         interrupted = True
     finally:
-        sample_stream.close()
+        close_stream = getattr(sample_stream, "close", None)
+        if callable(close_stream):
+            close_stream()
         if csv_writer is not None:
             csv_writer.close()
 
@@ -354,6 +410,60 @@ def _resolve_svg_out(
     return _default_svg_out(target, parsed.mentioned_events or request.events)
 
 
+def _resolve_data_out(
+    cli_value: str | None,
+    request,
+    target: TargetProcess,
+    *,
+    parsed,
+) -> str | None:
+    if cli_value:
+        return cli_value
+    if not parsed.wants_perf_data:
+        return None
+    if parsed.data_path and parsed.data_path.lower() != "perf.data":
+        return parsed.data_path
+    return _default_data_out(target, parsed.mentioned_events or request.events)
+
+
+def _resolve_data_in(
+    cli_value: str | None,
+    *,
+    parsed,
+) -> str | None:
+    if cli_value:
+        return _require_existing_data_path(cli_value)
+    if parsed.data_path and parsed.wants_parse_data and parsed.data_path.lower() != "perf.data":
+        return _require_existing_data_path(parsed.data_path)
+    if not parsed.wants_parse_data:
+        return None
+
+    default_path = Path("perf.data")
+    if default_path.exists():
+        return str(default_path)
+
+    latest_data = _find_latest_perf_data()
+    if latest_data is None:
+        raise ObservationError(
+            "missing perf.data file: specify --data-in, mention a .data path, or record perf.data first"
+        )
+    return str(latest_data)
+
+
+def _handle_perf_data_parse(data_path: str, *, dry_run: bool) -> int:
+    command = build_perf_script_command(data_path)
+    if dry_run:
+        print("preview   : simulated dry-run only; perf itself has no --dry-run option")
+        print(f"data-in   : {data_path}")
+        print(f"command   : {shlex.join(command)}")
+        return 0
+
+    output = _run_command(command)
+    if output:
+        print(output)
+    return 0
+
+
 def _default_svg_out(target: TargetProcess, events: tuple[str, ...]) -> str:
     target_label = _slugify_path_part(target.comm) or f"pid-{target.pid}"
     selected_events = tuple(
@@ -361,6 +471,22 @@ def _default_svg_out(target: TargetProcess, events: tuple[str, ...]) -> str:
     ) or tuple(events[:2])
     event_label = "-".join(_slugify_path_part(event) for event in selected_events[:3]) or "timeline"
     return str(Path("out") / f"{target_label}-{event_label}.svg")
+
+
+def _default_data_out(target: TargetProcess, events: tuple[str, ...]) -> str:
+    target_label = _slugify_path_part(target.comm) or f"pid-{target.pid}"
+    selected_events = tuple(
+        event for event in events if event not in {"instructions", "cycles"}
+    ) or tuple(events[:2])
+    event_label = "-".join(_slugify_path_part(event) for event in selected_events[:3]) or "timeline"
+    return str(
+        Path("out")
+        / f"{target_label}_targetpid{target.pid}_{event_label}_data_{_current_data_timestamp()}.data"
+    )
+
+
+def _current_data_timestamp() -> str:
+    return datetime.now().strftime("%Y%m%dT%H%M%S")
 
 
 def _slugify_path_part(value: str) -> str:
@@ -375,6 +501,28 @@ def _slugify_path_part(value: str) -> str:
             slug_chars.append("-")
             previous_dash = True
     return "".join(slug_chars).strip("-")
+
+
+def _require_existing_data_path(raw_path: str) -> str:
+    path = Path(raw_path)
+    if not path.exists() or not path.is_file():
+        raise ObservationError(f"perf.data file not found: {raw_path}")
+    return str(path)
+
+
+def _find_latest_perf_data() -> Path | None:
+    candidates: list[Path] = []
+    for path in Path(".").glob("*.data"):
+        if path.is_file():
+            candidates.append(path)
+    out_dir = Path("out")
+    if out_dir.exists():
+        for path in out_dir.rglob("*.data"):
+            if path.is_file():
+                candidates.append(path)
+    if not candidates:
+        return None
+    return max(candidates, key=lambda path: path.stat().st_mtime)
 
 
 def _handle_event_listing(filters: tuple[str, ...], *, dry_run: bool = False) -> int:
@@ -409,5 +557,5 @@ def _run_command(command: list[str]) -> str:
     return output
 
 
-def _emit_retry_notice(current_plan, next_plan, error: PerfStatError) -> None:
-    print(current_plan, file=sys.stderr)
+def _emit_retry_notice(message: str) -> None:
+    print(message, file=sys.stderr)

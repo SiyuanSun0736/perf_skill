@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import io
+from pathlib import Path
 import subprocess
+import tempfile
 import unittest
 from contextlib import redirect_stdout
 from unittest.mock import Mock, patch
@@ -113,6 +115,85 @@ class CliTest(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         write_svg_report_mock.assert_called_once()
         self.assertEqual(write_svg_report_mock.call_args.args[0], "out/node-cycles.svg")
+
+    def test_observe_dry_run_perf_data_request_generates_named_output(self) -> None:
+        stdout = io.StringIO()
+        with (
+            patch("perf_skill.cli.resolve_target", return_value=TargetProcess(pid=4242, comm="node")),
+            patch("perf_skill.cli.detect_pmu_slot_limit", return_value=4),
+            patch("perf_skill.cli._current_data_timestamp", return_value="20260519T120000"),
+            redirect_stdout(stdout),
+        ):
+            exit_code = main([
+                "observe",
+                "追踪 node 的 cycles 并输出 perf.data",
+                "--dry-run",
+            ])
+
+        self.assertEqual(exit_code, 0)
+        output = stdout.getvalue()
+        self.assertIn("data-out  : out/node_targetpid4242_cycles_data_20260519T120000.data", output)
+        self.assertIn("command   : perf record", output)
+
+    def test_observe_perf_data_request_runs_perf_record(self) -> None:
+        stdout = io.StringIO()
+        with (
+            patch("perf_skill.cli.resolve_target", return_value=TargetProcess(pid=4242, comm="node")),
+            patch("perf_skill.cli.detect_pmu_slot_limit", return_value=4),
+            patch("perf_skill.cli._current_data_timestamp", return_value="20260519T120000"),
+            patch("perf_skill.cli._run_command", return_value="recorded") as run_command_mock,
+            redirect_stdout(stdout),
+        ):
+            exit_code = main([
+                "observe",
+                "追踪 node 的 cycles 并输出 perf.data",
+                "--seconds",
+                "5",
+            ])
+
+        self.assertEqual(exit_code, 0)
+        run_command_mock.assert_called_once_with(
+            [
+                "perf",
+                "record",
+                "-o",
+                "out/node_targetpid4242_cycles_data_20260519T120000.data",
+                "-e",
+                "{instructions,cycles}",
+                "-p",
+                "4242",
+                "--",
+                "sleep",
+                "5",
+            ]
+        )
+        output = stdout.getvalue()
+        self.assertIn("recorded", output)
+        self.assertIn("data-out  : out/node_targetpid4242_cycles_data_20260519T120000.data", output)
+
+    def test_observe_parse_data_request_runs_perf_script(self) -> None:
+        stdout = io.StringIO()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_path = Path(temp_dir) / "node_targetpid4242_cycles_data_20260519T120000.data"
+            data_path.write_text("", encoding="utf-8")
+
+            with (
+                patch("perf_skill.cli._run_command", return_value="parsed events") as run_command_mock,
+                redirect_stdout(stdout),
+            ):
+                exit_code = main([
+                    "observe",
+                    f"解析 {data_path}",
+                ])
+
+        self.assertEqual(exit_code, 0)
+        run_command_mock.assert_called_once_with([
+            "perf",
+            "script",
+            "-i",
+            str(data_path),
+        ])
+        self.assertIn("parsed events", stdout.getvalue())
 
 
 if __name__ == "__main__":

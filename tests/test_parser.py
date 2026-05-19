@@ -27,6 +27,16 @@ class ParseStatementTest(unittest.TestCase):
         self.assertEqual(comm, "node")
         self.assertEqual(events, ("instructions", "cycles"))
 
+    def test_parse_statement_accepts_soft_and_tracepoint_events(self) -> None:
+        pid, comm, events = parse_statement("追踪 node 的 cpu-clock 和 sched:sched_switch")
+
+        self.assertIsNone(pid)
+        self.assertEqual(comm, "node")
+        self.assertEqual(
+            events,
+            ("instructions", "cycles", "cpu-clock", "sched:sched_switch"),
+        )
+
     def test_parse_bare_target_tokens(self) -> None:
         pid, comm, events = parse_statement("observe nginx 31337 instructions")
 
@@ -126,6 +136,24 @@ class ParseStatementTest(unittest.TestCase):
         self.assertEqual(
             parsed.events,
             ("instructions", "cycles", "branches", "branch-misses"),
+        )
+
+    def test_parse_observation_statement_detects_perf_data_record_request(self) -> None:
+        parsed = parse_observation_statement("追踪 node 的 cycles 并输出 perf.data")
+
+        self.assertEqual(parsed.comm, "node")
+        self.assertTrue(parsed.wants_perf_data)
+        self.assertFalse(parsed.wants_parse_data)
+        self.assertEqual(parsed.data_path, "perf.data")
+
+    def test_parse_observation_statement_detects_perf_data_parse_request(self) -> None:
+        parsed = parse_observation_statement("解析 out/node_targetpid4242_cycles_data_20260519T120000.data")
+
+        self.assertTrue(parsed.wants_parse_data)
+        self.assertFalse(parsed.wants_perf_data)
+        self.assertEqual(
+            parsed.data_path,
+            "out/node_targetpid4242_cycles_data_20260519T120000.data",
         )
 
     def test_build_request_applies_event_override(self) -> None:

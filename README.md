@@ -18,6 +18,8 @@ recent history charts.
 - Auto-splits groups against a PMU slot limit, with local hardware hints and vendor fallbacks
 - Automatically retries with smaller groups when perf reports retryable grouped-event failures
 - Starts `perf stat` with interval sampling and parses the live CSV output
+- Can switch to `perf record` and write a renamed `.data` artifact when requested
+- Can parse an existing `.data` file via `perf script -i`
 - Can export time-series samples as CSV and stacked SVG charts
 - Renders a rolling terminal dashboard with current counters and ASCII charts
 
@@ -65,6 +67,22 @@ perf-skill observe "探测20秒node的cycles并生成图像"
 perf-skill observe "生成10s内node的branchs的图像"
 ```
 
+If the statement asks for `perf.data`, the CLI switches to `perf record` and
+auto-picks a renamed output path like
+`out/node_targetpid4242_cycles_data_20260519T120000.data` when you did not pass
+`--data-out` explicitly:
+
+```bash
+perf-skill observe "追踪 node 的 cycles 并输出 perf.data" --seconds 10
+```
+
+If you want to parse an existing `.data` file, the CLI can proxy `perf script`:
+
+```bash
+perf-skill observe "解析 out/node_targetpid4242_cycles_data_20260519T120000.data"
+perf-skill observe --data-in out/node_targetpid4242_cycles_data_20260519T120000.data
+```
+
 If you only want to inspect available events, use `perf list` through the CLI:
 
 ```bash
@@ -76,10 +94,19 @@ perf-skill observe "show cache events"
 Use `--group-mode off` if you want the raw ungrouped event list, or
 `--group-mode always` if you want every event list chunked into groups.
 
-Use `--pmu-slots auto` to let the CLI pick a group size limit from local PMU
-metadata when available, then fall back to vendor heuristics such as `4` for
-common Intel cores and `6` for modern AMD Zen families. You can override this
-with an explicit integer such as `--pmu-slots 4`.
+Use `--pmu-slots auto` to keep the default hardware grouping budget at `4`
+slots. Cache and branch families stay grouped when possible, while software
+events such as `cpu-clock` and tracepoints such as `sched:sched_switch` do not
+consume those hardware slots. You can still override the budget with an
+explicit integer such as `--pmu-slots 4`.
+
+The parser also accepts these event names directly in natural-language
+statements, for example:
+
+```bash
+perf-skill observe "trace node cpu-clock sched:sched_switch" --plain
+perf-skill observe "追踪 node 的 cpu-clock 和 sched:sched_switch" --plain
+```
 
 If grouped collection fails with retryable `perf` diagnostics such as
 `<not counted>` or grouped counter scheduling errors, the CLI now retries with
@@ -101,6 +128,9 @@ The parser is intentionally narrow and predictable.
 - `trace comm=python pid=4242 inst cycles`
 - `observe python 4242 instructions`
 - `observe node instructions`
+- `observe node cpu-clock sched:sched_switch`
+- `追踪 node 的 cycles 并输出 perf.data`
+- `解析 out/node_targetpid4242_cycles_data_20260519T120000.data`
 - `trace pid=4242 inst cycles for 5 seconds`
 - `observe pid=4242 cache-misses 10 samples`
 - `追踪 comm=nginx pid=31337 inst cycles`
@@ -138,6 +168,7 @@ Auto grouping rules:
 - `instructions` and `cycles` stay in the same core group
 - `branches` and `branch-misses` are grouped together when both are present
 - `cache-references` and `cache-misses` are grouped together when both are present
+- Names that share a strong prefix, suffix, or namespace are preferred in the same group when there is a choice
 - Single leftover events are merged into an existing group when there is room
 
 ## Exporting traces
@@ -163,6 +194,18 @@ SVG charts are rendered with matplotlib instead of hand-written XML, so the
 output is easier to read and closer to a normal plotting workflow.
 
 Use `--no-svg-legend` if you want a more compact SVG without the color legend.
+
+Write a renamed `perf.data` artifact with `perf record`:
+
+```bash
+perf-skill observe "trace pid=4242 inst cycles" --data-out out/python_targetpid4242_cycles_data_20260519T120000.data --seconds 10
+```
+
+Parse a recorded `.data` artifact with `perf script`:
+
+```bash
+perf-skill observe --data-in out/python_targetpid4242_cycles_data_20260519T120000.data
+```
 
 ## Packaging and releases
 

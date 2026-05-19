@@ -49,6 +49,20 @@ EVENT_ALIASES = {
     "zhouqi": "cycles",
 }
 
+SOFTWARE_EVENT_NAMES = {
+    "alignment-faults",
+    "bpf-output",
+    "context-switches",
+    "cpu-clock",
+    "cpu-migrations",
+    "dummy",
+    "emulation-faults",
+    "major-faults",
+    "minor-faults",
+    "page-faults",
+    "task-clock",
+}
+
 ACTION_TOKENS = {
     "trace",
     "track",
@@ -167,6 +181,14 @@ SVG_HINT_PATTERNS = (
     re.compile(r"(图像|图片|图表|曲线图|趋势图|svg)"),
     re.compile(r"\b(image|chart|plot|svg)\b"),
 )
+PERF_DATA_RECORD_HINT_PATTERNS = (
+    re.compile(r"(录制|记录|保存|输出|导出).*(perf\.data|\.data\b|data文件|data file)"),
+    re.compile(r"\b(record)\b.*\b(perf\.data|data)\b"),
+)
+PERF_DATA_PARSE_HINT_PATTERNS = (
+    re.compile(r"(解析|分析).*(perf\.data|\.data\b|data文件|data file)"),
+    re.compile(r"\b(parse|analyze)\b.*\b(perf\.data|data)\b"),
+)
 LIST_EVENT_HINT_PATTERNS = (
     re.compile(r"\bperf\s+list\b"),
     re.compile(r"\b(list|show|view)\b.*\b(events?)\b"),
@@ -206,6 +228,9 @@ class ParsedObservation:
     duration_sec: int | None
     wants_dry_run: bool
     wants_svg: bool
+    wants_perf_data: bool
+    wants_parse_data: bool
+    data_path: str | None
     wants_event_list: bool
     event_filters: tuple[str, ...]
 
@@ -224,7 +249,7 @@ def build_request(
 
     resolved_events = parsed_observation.events or normalize_events(())
     if extra_events:
-        resolved_events = normalize_events(tuple(extra_events), allow_unknown=True)
+        resolved_events = normalize_events(tuple(extra_events))
 
     request = ObservationRequest(
         statement=statement,
@@ -261,6 +286,9 @@ def parse_observation_statement(statement: str) -> ParsedObservation:
             duration_sec=None,
             wants_dry_run=False,
             wants_svg=False,
+            wants_perf_data=False,
+            wants_parse_data=False,
+            data_path=None,
             wants_event_list=False,
             event_filters=(),
         )
@@ -269,6 +297,9 @@ def parse_observation_statement(statement: str) -> ParsedObservation:
     duration_sec = _extract_count_hint(statement, DURATION_PATTERNS, label="seconds")
     wants_dry_run = _has_hint(statement, PREVIEW_HINT_TOKENS)
     wants_svg = _has_svg_intent(statement)
+    wants_perf_data = _has_perf_data_record_intent(statement)
+    wants_parse_data = _has_perf_data_parse_intent(statement)
+    data_path = _extract_data_path(statement)
     wants_event_list = _has_list_event_intent(statement)
 
     tokens = shlex.split(statement)
@@ -366,20 +397,19 @@ def parse_observation_statement(statement: str) -> ParsedObservation:
         duration_sec=duration_sec,
         wants_dry_run=wants_dry_run,
         wants_svg=wants_svg,
+        wants_perf_data=wants_perf_data,
+        wants_parse_data=wants_parse_data,
+        data_path=data_path,
         wants_event_list=wants_event_list,
         event_filters=_build_event_filters(mentioned_events, unknowns),
     )
 
 
-def normalize_events(
-    raw_events: tuple[str, ...] | list[str],
-    *,
-    allow_unknown: bool = False,
-) -> tuple[str, ...]:
+def normalize_events(raw_events: tuple[str, ...] | list[str]) -> tuple[str, ...]:
     normalized: list[str] = []
     seen: set[str] = set()
     for raw_event in raw_events:
-        normalized_event = normalize_event_name(raw_event, allow_unknown=allow_unknown)
+        normalized_event = normalize_event_name(raw_event)
         if normalized_event is None or normalized_event in seen:
             continue
         normalized.append(normalized_event)
@@ -397,7 +427,7 @@ def normalize_events(
     return tuple(_expand_event_families(normalized))
 
 
-def normalize_event_name(raw_event: str, *, allow_unknown: bool = False) -> str | None:
+def normalize_event_name(raw_event: str) -> str | None:
     raw_token = _clean_value(raw_event).lower()
     token = raw_token.replace("_", "-")
     if not token:
@@ -413,16 +443,15 @@ def normalize_event_name(raw_event: str, *, allow_unknown: bool = False) -> str 
         "cache-references",
     }:
         return token
+    if token in SOFTWARE_EVENT_NAMES:
+        return token
     if ":" in token:
         base_token = token.split(":", maxsplit=1)[0]
         normalized_base = normalize_event_name(base_token)
         if normalized_base is not None:
             return normalized_base
-        if allow_unknown:
+        if _looks_like_tracepoint_event(raw_token):
             return raw_token
-        return None
-    if allow_unknown:
-        return raw_token
     return None
 
 
@@ -475,6 +504,16 @@ def _has_svg_intent(statement: str) -> bool:
     return any(pattern.search(lowered) for pattern in SVG_HINT_PATTERNS)
 
 
+def _has_perf_data_record_intent(statement: str) -> bool:
+    lowered = statement.lower()
+    return any(pattern.search(lowered) for pattern in PERF_DATA_RECORD_HINT_PATTERNS)
+
+
+def _has_perf_data_parse_intent(statement: str) -> bool:
+    lowered = statement.lower()
+    return any(pattern.search(lowered) for pattern in PERF_DATA_PARSE_HINT_PATTERNS)
+
+
 def _has_list_event_intent(statement: str) -> bool:
     lowered = statement.lower()
     return any(pattern.search(lowered) for pattern in LIST_EVENT_HINT_PATTERNS)
@@ -491,6 +530,15 @@ def _extract_count_hint(
         match = pattern.search(lowered)
         if match is not None:
             return _parse_positive_int(match.group(1), label=label)
+    return None
+
+
+def _extract_data_path(statement: str) -> str | None:
+    for token in shlex.split(statement):
+        cleaned = _clean_value(token)
+        lowered = cleaned.lower()
+        if lowered.endswith(".data") or lowered == "perf.data":
+            return cleaned
     return None
 
 
@@ -605,6 +653,10 @@ def _event_filter_term(event: str) -> str:
         "branches": "branch",
         "cache-references": "cache",
     }.get(event, event)
+
+
+def _looks_like_tracepoint_event(raw_token: str) -> bool:
+    return bool(re.fullmatch(r"[a-z0-9_.-]+:[a-z0-9_.-]+", raw_token))
 
 
 def _clean_value(raw_value: str) -> str:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import queue
+import re
 import threading
 from collections.abc import Callable
 from functools import lru_cache
@@ -138,6 +139,40 @@ def build_perf_command(
     ]
 
 
+def build_perf_record_command(
+    request: ObservationRequest,
+    target: TargetProcess,
+    *,
+    output_path: str,
+    duration_sec: int | None = None,
+    group_mode: str = "auto",
+    pmu_slots: int | None = None,
+    groups: tuple[tuple[str, ...], ...] | None = None,
+) -> list[str]:
+    resolved_groups = groups or plan_event_groups(
+        request.events,
+        group_mode=group_mode,
+        pmu_slots=pmu_slots,
+    )
+    command = [
+        "perf",
+        "record",
+        "-o",
+        output_path,
+        "-e",
+        build_group_expression(resolved_groups),
+        "-p",
+        str(target.pid),
+    ]
+    if duration_sec is not None:
+        command.extend(["--", "sleep", str(duration_sec)])
+    return command
+
+
+def build_perf_script_command(data_path: str) -> list[str]:
+    return ["perf", "script", "-i", data_path]
+
+
 def plan_event_groups(
     events: Iterable[str],
     *,
@@ -192,6 +227,24 @@ def stream_perf_samples(
         group_mode=group_mode,
         pmu_slots=resolved_pmu_slots,
     )
+
+    if len(initial_groups) > 1:
+        emitted_combined_samples = False
+        try:
+            for sample in _stream_perf_attempt(
+                request,
+                target,
+                groups=initial_groups,
+            ):
+                emitted_combined_samples = True
+                yield sample
+            return
+        except PerfStatError as error:
+            if emitted_combined_samples or not retry_grouping:
+                raise
+            if on_retry is not None:
+                on_retry(format_combined_group_fallback_notice(initial_groups, error))
+
     merge_tolerance = max(request.interval_ms / 1000.0 / 4.0, 0.1)
     message_queue: queue.Queue[
         _GroupSampleMessage | _GroupRetryMessage | _GroupDoneMessage | _GroupErrorMessage
@@ -458,6 +511,18 @@ def format_group_retry_notice(
     )
 
 
+def format_combined_group_fallback_notice(
+    groups: tuple[tuple[str, ...], ...],
+    error: PerfStatError,
+) -> str:
+    reason = _summarize_retry_reason(error)
+    rendered_groups = " | ".join(_describe_group(group) for group in groups)
+    return (
+        f"retry     : {reason}; combined run for [{rendered_groups}] failed before yielding samples, "
+        "retrying groups individually"
+    )
+
+
 def parse_perf_csv_line(line: str, known_events: Iterable[str]) -> PerfMeasurement | None:
     parts = [part.strip() for part in line.split(",")]
     if len(parts) < 4:
@@ -630,12 +695,11 @@ def _plan_auto_groups(
             remaining.remove(event)
 
     for event in remaining:
-        for group in groups:
-            if _can_append_event(group, event, max_group_size=max_group_size):
-                group.append(event)
-                break
-        else:
+        target_group_index = _pick_target_group_index(groups, event, max_group_size=max_group_size)
+        if target_group_index is None:
             groups.append([event])
+        else:
+            groups[target_group_index].append(event)
 
     split_groups = _split_oversized_groups(groups, max_group_size=max_group_size)
     merged_groups = _merge_singleton_groups(split_groups, max_group_size=max_group_size)
@@ -653,12 +717,15 @@ def _merge_singleton_groups(
     merged_groups: list[list[str]] = [list(groups[0])]
     for group in groups[1:]:
         if len(group) == 1:
-            for target_group in merged_groups:
-                if _can_append_group(target_group, group, max_group_size=max_group_size):
-                    target_group.extend(group)
-                    break
-            else:
+            target_group_index = _pick_merge_target_group_index(
+                merged_groups,
+                group,
+                max_group_size=max_group_size,
+            )
+            if target_group_index is None:
                 merged_groups.append(list(group))
+            else:
+                merged_groups[target_group_index].extend(group)
             continue
         merged_groups.append(list(group))
     return merged_groups
@@ -780,6 +847,128 @@ def _match_known_event_name(raw_event: str, known_events: Iterable[str]) -> str 
         if ":" not in event and ":" in cleaned and cleaned.rsplit(":", maxsplit=1)[0] == event:
             return event
     return None
+
+
+def _pick_target_group_index(
+    groups: list[list[str]],
+    event: str,
+    *,
+    max_group_size: int,
+) -> int | None:
+    fallback_index: int | None = None
+    best_index: int | None = None
+    best_score = 0
+
+    for index, group in enumerate(groups):
+        if not _can_append_event(group, event, max_group_size=max_group_size):
+            continue
+        if fallback_index is None:
+            fallback_index = index
+        score = _group_similarity_score(group, event)
+        if score > best_score:
+            best_score = score
+            best_index = index
+
+    if best_index is not None:
+        return best_index
+    return fallback_index
+
+
+def _pick_merge_target_group_index(
+    target_groups: list[list[str]],
+    source_group: list[str],
+    *,
+    max_group_size: int,
+) -> int | None:
+    fallback_index: int | None = None
+    best_index: int | None = None
+    best_score = 0
+
+    for index, target_group in enumerate(target_groups):
+        if not _can_append_group(target_group, source_group, max_group_size=max_group_size):
+            continue
+        if fallback_index is None:
+            fallback_index = index
+        score = max(
+            (_event_similarity_score(left_event, right_event) for left_event in target_group for right_event in source_group),
+            default=0,
+        )
+        if score > best_score:
+            best_score = score
+            best_index = index
+
+    if best_index is not None:
+        return best_index
+    return fallback_index
+
+
+def _group_similarity_score(group: Iterable[str], event: str) -> int:
+    return max((_event_similarity_score(group_event, event) for group_event in group), default=0)
+
+
+def _event_similarity_score(left_event: str, right_event: str) -> int:
+    left_cleaned = left_event.strip().lower().replace("_", "-")
+    right_cleaned = right_event.strip().lower().replace("_", "-")
+    if not left_cleaned or not right_cleaned:
+        return 0
+    if left_cleaned == right_cleaned:
+        return 1000
+
+    left_family = _event_family_key(left_cleaned)
+    right_family = _event_family_key(right_cleaned)
+    if left_family is not None and right_family is not None and left_family != right_family:
+        return 0
+
+    score = 0
+    if left_family is not None and left_family == right_family:
+        score += 300
+
+    left_namespace = _event_namespace(left_cleaned)
+    right_namespace = _event_namespace(right_cleaned)
+    if left_namespace is not None and left_namespace == right_namespace:
+        score += 200
+
+    left_tokens = _event_name_tokens(left_cleaned)
+    right_tokens = _event_name_tokens(right_cleaned)
+    if left_tokens and right_tokens and left_tokens[0] == right_tokens[0]:
+        score += 120
+    if left_tokens and right_tokens and left_tokens[-1] == right_tokens[-1]:
+        score += 40
+
+    token_overlap = len(set(left_tokens) & set(right_tokens))
+    score += token_overlap * 15
+    score += min(len(_shared_prefix(left_cleaned, right_cleaned)), 24)
+    return score
+
+
+def _event_family_key(event: str) -> str | None:
+    normalized_event = normalize_event_name(event)
+    if normalized_event in {"instructions", "cycles"}:
+        return "core"
+    if normalized_event in {"branches", "branch-misses"}:
+        return "branch"
+    if normalized_event in {"cache-references", "cache-misses"}:
+        return "cache"
+    return None
+
+
+def _event_namespace(event: str) -> str | None:
+    if ":" not in event:
+        return None
+    return event.split(":", maxsplit=1)[0]
+
+
+def _event_name_tokens(event: str) -> tuple[str, ...]:
+    return tuple(token for token in re.split(r"[:/_-]+", event) if token)
+
+
+def _shared_prefix(left: str, right: str) -> str:
+    matched: list[str] = []
+    for left_char, right_char in zip(left, right, strict=False):
+        if left_char != right_char:
+            break
+        matched.append(left_char)
+    return "".join(matched)
 
 
 def _group_slot_cost(group: Iterable[str]) -> int:

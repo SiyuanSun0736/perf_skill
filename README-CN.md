@@ -15,6 +15,8 @@ perf-skill 是一个面向 Linux 的 CLI 工具，用来把简短的声明式指
 - 根据 PMU slot 上限自动拆组，并结合本机硬件信息或厂商启发式做默认值推断
 - 当 perf 对某个 group 返回可重试错误时，只拆失败的 group，不重跑整批事件
 - 解析 `perf stat` 的区间采样输出并实时展示
+- 在需要时切换到 `perf record`，并输出自动重命名的 `.data` 文件
+- 支持对已有 `.data` 文件执行 `perf script -i` 解析
 - 支持导出 CSV 与 SVG 时序图
 - 提供 ASCII 终端仪表板和单行 plain 输出两种显示模式
 
@@ -62,6 +64,23 @@ perf-skill observe "探测20秒node的cycles并生成图像"
 perf-skill observe "生成10s内node的branchs的图像"
 ```
 
+如果 statement 里提到了 `perf.data`，CLI 会自动切到 `perf record`，并在你没有显式传 `--data-out` 时，默认生成类似下面这种名字：
+
+`out/node_targetpid4242_cycles_data_20260519T120000.data`
+
+例如：
+
+```bash
+perf-skill observe "追踪 node 的 cycles 并输出 perf.data" --seconds 10
+```
+
+如果你要解析已有的 `.data` 文件，也可以直接走 `perf script` 代理：
+
+```bash
+perf-skill observe "解析 out/node_targetpid4242_cycles_data_20260519T120000.data"
+perf-skill observe --data-in out/node_targetpid4242_cycles_data_20260519T120000.data
+```
+
 如果只是想先看当前机器支持哪些事件，可以直接走 `perf list`：
 
 ```bash
@@ -82,10 +101,17 @@ perf-skill observe "trace pid=4242 inst cycles" --group-mode off
 perf-skill observe "trace pid=4242 inst cycles branches cache-misses" --group-mode always
 ```
 
-`--pmu-slots auto` 会优先读取本机 PMU 元数据，再回退到厂商启发式，例如常见 Intel 核心默认 `4`，较新的 AMD Zen 系列默认 `6`。也可以手动覆盖：
+`--pmu-slots auto` 现在默认按 `4` 个硬件 slot 做自动分组。cache 和 branch 家族事件会尽量保持在一起，而像 `cpu-clock` 这类 soft event 和 `sched:sched_switch` 这类 tracepoint 不会占用这 4 个硬件 slot。也可以手动覆盖：
 
 ```bash
 perf-skill observe "trace pid=4242 inst cycles" --pmu-slots 4
+```
+
+解析器现在也支持你在自然语言里直接写这些事件名，例如：
+
+```bash
+perf-skill observe "trace node cpu-clock sched:sched_switch" --plain
+perf-skill observe "追踪 node 的 cpu-clock 和 sched:sched_switch" --plain
 ```
 
 如果 grouped collection 失败，例如遇到 `<not counted>` 或 perf 的 group 调度类错误，CLI 会自动缩小失败 group 的 slot 上限，最后必要时回退到非 group 模式。已经成功的 group 会保持原样，不会被一起降级。关闭这个行为可以使用：
@@ -110,6 +136,9 @@ perf-skill observe --help
 - `trace comm=python pid=4242 inst cycles`
 - `observe python 4242 instructions`
 - `observe node instructions`
+- `observe node cpu-clock sched:sched_switch`
+- `追踪 node 的 cycles 并输出 perf.data`
+- `解析 out/node_targetpid4242_cycles_data_20260519T120000.data`
 - `trace pid=4242 inst cycles for 5 seconds`
 - `observe pid=4242 cache-misses 10 samples`
 - `追踪 comm=nginx pid=31337 inst cycles`
@@ -145,6 +174,7 @@ perf-skill observe --help
 - `instructions` 和 `cycles` 会优先放在同一个核心 group 中
 - 如果同时存在，`branches` 和 `branch-misses` 会被放进同一组
 - 如果同时存在，`cache-references` 和 `cache-misses` 会被放进同一组
+- 如果多个事件有明显相同的前缀、后缀或 namespace，auto 模式会优先把它们放在一起
 - 剩余的单个事件会尽量塞进还有容量的组里
 
 ## 导出时序数据
@@ -171,6 +201,18 @@ CSV 是每个采样区间一行。SVG 是一个按指标分面板堆叠的时序
 
 ```bash
 perf-skill observe "trace pid=4242 inst cycles" --svg-out out/timeline.svg --no-svg-legend
+```
+
+如果你想直接录制并输出重命名后的 `.data` 文件，可以用：
+
+```bash
+perf-skill observe "trace pid=4242 inst cycles" --data-out out/python_targetpid4242_cycles_data_20260519T120000.data --seconds 10
+```
+
+如果你要解析已经录好的 `.data` 文件，可以用：
+
+```bash
+perf-skill observe --data-in out/python_targetpid4242_cycles_data_20260519T120000.data
 ```
 
 ## 打包与发布
