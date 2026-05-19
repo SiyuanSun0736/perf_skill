@@ -20,6 +20,11 @@ recent history charts.
 - Starts `perf stat` with interval sampling and parses the live CSV output
 - Can switch to `perf record` and write a renamed `.data` artifact when requested
 - Can parse an existing `.data` file via `perf script -i`
+- Can auto-clone Brendan Gregg's FlameGraph repository and render FlameGraph SVGs from recorded `.data` files
+- Can continue `.data` analysis with `perf report --stdio` and `perf annotate --stdio`
+- Can launch `stress-ng` or `ab` through the `exercise` subcommand and observe either the resolved target or the load process itself during the run
+- Can generate Python-side summaries with trends, miss ratios, expert diagnosis, and top perf.data hotspots
+- Can export those summaries as structured JSON for later automation
 - Can export time-series samples as CSV and stacked SVG charts
 - Renders a rolling terminal dashboard with current counters and ASCII charts
 
@@ -76,6 +81,16 @@ auto-picks a renamed output path like
 perf-skill observe "追踪 node 的 cycles 并输出 perf.data" --seconds 10
 ```
 
+If the statement asks for a FlameGraph, or if you pass `--flamegraph-out`, the
+CLI also switches to `perf record -g`, bootstraps
+`https://github.com/brendangregg/FlameGraph.git` under
+`~/.openclaw/perf-skill/FlameGraph` on first use, and writes a FlameGraph SVG:
+
+```bash
+perf-skill observe "追踪 node 的 cycles 并生成火焰图" --seconds 10
+perf-skill observe --data-in out/node_targetpid4242_cycles_data_20260519T120000.data --flamegraph-out out/node-flamegraph.svg
+```
+
 If you want to parse an existing `.data` file, the CLI can proxy `perf script`:
 
 ```bash
@@ -83,12 +98,199 @@ perf-skill observe "解析 out/node_targetpid4242_cycles_data_20260519T120000.da
 perf-skill observe --data-in out/node_targetpid4242_cycles_data_20260519T120000.data
 ```
 
+If you want a second-hop analysis step after the Python-side `.data` summary,
+you can now append `perf report --stdio` or auto-run `perf annotate --stdio`
+for the hottest parsed symbol:
+
+```bash
+perf-skill observe --data-in out/node_targetpid4242_cycles_data_20260519T120000.data --summary --report-stdio
+perf-skill observe --data-in out/node_targetpid4242_cycles_data_20260519T120000.data --annotate-top
+perf-skill observe --data-in out/node_targetpid4242_cycles_data_20260519T120000.data --annotate-symbol 'v8::Function+0x10'
+```
+
+If you want analysis that goes beyond a single `perf` command, enable the
+Python summary layer. It can compute post-run averages, peaks, trends, derived
+ratios such as branch-miss rate and cache-miss rate, automatically flag anomaly
+points such as sudden IPC drops or miss-rate surges, turn those signals into
+expert diagnosis plus next-step recommendations, and summarize `.data`
+artifacts by top events, threads, callchains, comms, symbols, and ranked hotspots:
+
+```bash
+perf-skill observe "trace pid=4242 inst cycles" --summary
+perf-skill observe "trace pid=4242 branches branch-misses" --summary-out out/summary.json
+perf-skill observe "解析 out/node_targetpid4242_cycles_data_20260519T120000.data" --summary
+```
+
+For live observations, anomaly lines are emitted in the summary with the sample
+timestamp where the deviation was detected, and the summary now also emits
+`insight` and `next-step` lines so the result is easier to act on.
+Plain and dashboard output now also mark those anomalies as they happen.
+For `.data` parsing, thread-level aggregation is shown as `top-thread` entries
+keyed by `comm pid/tid`, `top-callchain` entries summarize stacked perf script
+frames, `top-callchain[event]` further breaks those stacks down per event such
+as `cycles` or `sched:sched_switch`, and `hotspot` lines highlight the symbols
+with the largest sample share. The dashboard also keeps an alert summary with a
+total anomaly count, a recent time-window count, and the last alert timestamp.
+If you want novice-friendly metaphors or term translation, keep that in the AI
+layer or skill response instead of expecting the CLI summary itself to render it.
+
+If you want a single command for load generation plus observation, use the new
+`exercise` subcommand. It launches `stress-ng` or `ab`, then observes either the
+resolved target or, when no target is given, the load process itself. The final
+output includes both the load-tool result and the perf summary:
+
+```bash
+perf-skill exercise stress-ng --load-args "--cpu 4 --timeout 10" --summary
+perf-skill exercise ab "trace comm=nginx cache-misses" --load-args "-n 1000 -c 50 http://127.0.0.1:8080/" --summary
+```
+
+`exercise` is best for `load generation + live perf stat`. If you really want
+hotspots, symbols, FlameGraphs, whole-machine observation, page-fault ranking,
+or discovery before choosing a target, do not force the whole workflow into the
+Python CLI. It is usually better to use `pgrep`, `ps`, `free`, `vmstat`,
+`smem`, or native `perf` for the discovery and recording steps, then hand the
+resolved target or recorded `.data` artifact back to `perf-skill` for summary,
+reporting, or rendering.
+
+## AI/agent routing quick reference
+
+This table describes how an AI or human operator should route the workflow. It
+is broader than the narrow statement parser. Use `perf-skill` when it fits, and
+use shell plus native `perf` when the workflow needs discovery, system-wide
+scope, or a recording step that the current CLI does not cover end-to-end.
+
+| User intent | Preferred path | Keep outside the Python CLI |
+| --- | --- | --- |
+| Known target, counters, IPC, or summary | `perf-skill observe` | Nothing special |
+| Known target under generated load, live counters only | `perf-skill exercise` | Let the AI decide the `stress-ng` or `ab` arguments |
+| Hotspots, symbols, callchains, FlameGraphs, or hotspot-style images | `perf record -g` + `perf-skill observe --data-in` | Recording and multi-step orchestration |
+| Whole-machine branch, cache, or page-fault observation | native `perf ... -a` | system-wide scope |
+| Find the process with the most page faults | native `perf` discovery first, then `perf-skill` summary | offender discovery |
+| Memory stays high and no target is known yet | `free`, `vmstat`, `ps`, `smem`, then `perf stat` or `perf record -g` | baseline and target discovery |
+| One `comm` matches multiple PIDs | `pgrep -ax` or `ps -C` first, then ask the user | PID disambiguation |
+
+## Scenario-driven workflows
+
+These workflows are meant for both humans and agents. The goal is to keep the
+workflow realistic instead of pretending every request should be compressed into
+one parser statement.
+
+1. `Generate CPU50 load, then probe node branch for 10s and tell me the result`
+
+	This is a `load + known process + summary counters` flow. Resolve the `node`
+	PID first. If there is only one match, `exercise` is the simplest path.
+
+	```bash
+	pgrep -x node
+	perf-skill exercise stress-ng "trace pid=4242 branches branch-misses" \
+	  --load-args "--cpu 1 --cpu-load 50 --timeout 10" \
+	  --seconds 10 --summary
+	```
+
+2. `Generate CPU50 load, then probe node branch for 10s and tell me hotspots or symbols`
+
+	This is a `load + known process + hotspots` flow, so switch to
+	`perf record -g`. `exercise` does not cover that chain today. Start the load
+	with shell, record with native `perf`, then hand the `.data` file back to
+	`perf-skill` for summary, `perf report --stdio`, or `perf annotate`.
+
+	```bash
+	pgrep -x node
+	stress-ng --cpu 1 --cpu-load 50 --timeout 12 &
+	perf record -g -o out/node-branches.data -e branches,branch-misses -p 4242 -- sleep 10
+	perf-skill observe --data-in out/node-branches.data --summary --report-stdio
+	perf-skill observe --data-in out/node-branches.data --annotate-top
+	```
+
+3. `Generate CPU50 load, then probe node branch for 10s and generate an image`
+
+	Decide whether the user wants a trend chart or a hotspot picture. For branch
+	trends, export a timeline SVG. For hotspot pictures, record `.data` and emit
+	a FlameGraph.
+
+	```bash
+	pgrep -x node
+	perf-skill exercise stress-ng "trace pid=4242 branches branch-misses" \
+	  --load-args "--cpu 1 --cpu-load 50 --timeout 10" \
+	  --seconds 10 --svg-out out/node-branches.svg
+
+	stress-ng --cpu 1 --cpu-load 50 --timeout 12 &
+	perf record -g -o out/node-branches.data -e branches,branch-misses -p 4242 -- sleep 10
+	perf-skill observe --data-in out/node-branches.data --flamegraph-out out/node-branches-flamegraph.svg
+	```
+
+4. `Generate CPU50 load, then probe whole-machine branch for 10s`
+
+	This is system-wide observation. Do not guess a PID first.
+
+	```bash
+	stress-ng --cpu 1 --cpu-load 50 --timeout 12 &
+	perf stat -a -e branches,branch-misses -- sleep 10
+	```
+
+5. `Find the program with the most page faults`
+
+	This is offender discovery. Run a short system-wide recording first, then use
+	the Python summary to inspect `top-comm`, `top-thread`, and hotspots.
+
+	```bash
+	perf record -a -g -o out/pagefaults.data -e page-faults -- sleep 10
+	perf-skill observe --data-in out/pagefaults.data --summary
+	```
+
+6. `Memory usage stays high. How should I test it?`
+
+	Start with a baseline before deciding whether this is even a `perf` question.
+	Separate whole-machine memory pressure, swap activity, page-fault pressure,
+	and a single process with outsized RSS. Only then choose `perf stat` or
+	`perf record -g`.
+
+	```bash
+	free -h
+	vmstat 1 5
+	ps -eo pid,comm,rss,%mem --sort=-rss | head
+	smem -rk | head
+	perf stat -p 4242 -e page-faults,minor-faults,major-faults -- sleep 10
+	```
+
+7. `I said node, but the machine has multiple node processes`
+
+	Do not let the CLI fail on ambiguity and do not pick a PID silently. Show the
+	candidates and ask once.
+
+	```bash
+	pgrep -ax node
+	ps -C node -o pid,cmd
+	```
+
+8. `I already have perf.data. Continue with hotspots, FlameGraph, or symbols`
+
+	This is a `.data` second-hop analysis flow. Reuse the artifact instead of
+	attaching again.
+
+	```bash
+	perf-skill observe --data-in out/node_targetpid4242_cycles_data_20260519T120000.data --summary --report-stdio
+	perf-skill observe --data-in out/node_targetpid4242_cycles_data_20260519T120000.data --annotate-top
+	perf-skill observe --data-in out/node_targetpid4242_cycles_data_20260519T120000.data --flamegraph-out out/node-flamegraph.svg
+	```
+
+9. `The server feels slow, but I do not yet know which process to inspect`
+
+	This is target discovery. Inspect CPU, memory, and listeners first. Only
+	attach once the target is clear.
+
+	```bash
+	ps -eo pid,comm,%cpu,%mem --sort=-%cpu | head
+	ps -eo pid,comm,rss,%mem --sort=-rss | head
+	ss -lntp | head
+	perf-skill events branch
+	```
+
 If you only want to inspect available events, use `perf list` through the CLI:
 
 ```bash
 perf-skill events
 perf-skill events cache
-perf-skill observe "show cache events"
 ```
 
 Use `--group-mode off` if you want the raw ungrouped event list, or
@@ -119,18 +321,26 @@ You can inspect the full CLI reference with:
 ```bash
 perf-skill --help
 perf-skill observe --help
+perf-skill exercise --help
 ```
 
 ## Supported statement forms
 
-The parser is intentionally narrow and predictable.
+The parser is intentionally narrow and predictable. The `AI/agent routing quick
+reference` and `Scenario-driven workflows` sections above can be broader than
+the parser itself, because workflow orchestration is allowed to combine shell,
+native `perf`, and `perf-skill` instead of forcing every request into one
+statement.
 
 - `trace comm=python pid=4242 inst cycles`
 - `observe python 4242 instructions`
 - `observe node instructions`
 - `observe node cpu-clock sched:sched_switch`
 - `追踪 node 的 cycles 并输出 perf.data`
+- `追踪 node 的 cycles 并生成火焰图`
 - `解析 out/node_targetpid4242_cycles_data_20260519T120000.data`
+- `解析 out/node_targetpid4242_cycles_data_20260519T120000.data 并生成火焰图`
+- `trace pid=4242 inst cycles summary`
 - `trace pid=4242 inst cycles for 5 seconds`
 - `observe pid=4242 cache-misses 10 samples`
 - `追踪 comm=nginx pid=31337 inst cycles`
@@ -140,10 +350,9 @@ The parser is intentionally narrow and predictable.
 - `生成10s内node的branchs的图像`
 - `追踪 pid=31337 的 inst 和 cycles，采样10次`
 - `追踪 node 持续 30 秒，采 20 个样本`
-- `列出 branch 相关事件`
-- `支持哪些 PMU 事件`
-- `查看 cache 相关事件`
 - `watch pid 9001 events=inst,cycles,cache-misses`
+
+Event listing is intentionally explicit now. Use `perf-skill events`, `perf-skill events cache`, or let the skill route a natural-language event-listing request to that subcommand instead of widening the parser again.
 
 Recognized target keys:
 
@@ -205,6 +414,13 @@ Parse a recorded `.data` artifact with `perf script`:
 
 ```bash
 perf-skill observe --data-in out/python_targetpid4242_cycles_data_20260519T120000.data
+```
+
+Write a Python-generated JSON summary:
+
+```bash
+perf-skill observe "trace pid=4242 inst cycles" --summary-out out/summary.json
+perf-skill observe --data-in out/python_targetpid4242_cycles_data_20260519T120000.data --summary-out out/data-summary.json
 ```
 
 ## Packaging and releases
@@ -277,6 +493,7 @@ Example invocations:
 ```text
 /hardware-event-observe 追踪 comm=node pid=16874 的 inst 和 cycles
 /hardware-event-observe observe pid=16874 cache-misses branches
+/hardware-event-observe 解析 out/node_targetpid16874_cycles_data_20260519T120000.data 并生成火焰图
 /hardware-event-observe observe pid=16874 branch-misses --samples 10 --csv-out out/node.csv --svg-out out/node.svg
 ```
 
@@ -290,6 +507,10 @@ bash .github/skills/hardware-event-observe/scripts/run-observe.sh \
 The script keeps the invocation inside this repository and uses `python3` with
 an auto-bootstrapped virtual environment under `~/.openclaw/perf-skill/venv`.
 On the first run, it creates that environment and installs this repository in
-editable mode with its Python dependencies. You can override the install path
-with `OPENCLAW_HOME`, `PERF_SKILL_HOME`, or `PERF_SKILL_VENV_DIR`.
+editable mode with its Python dependencies. FlameGraph rendering also
+auto-clones Brendan Gregg's FlameGraph repository under
+`~/.openclaw/perf-skill/FlameGraph` on first use. You can override the shared
+install path with `OPENCLAW_HOME` or `PERF_SKILL_HOME`, the virtual environment
+path with `PERF_SKILL_VENV_DIR`, and the FlameGraph checkout path with
+`PERF_SKILL_FLAMEGRAPH_DIR`.
 

@@ -109,4 +109,14 @@ fi
 cd "$repo_root"
 ensure_runtime_env "$repo_root"
 
-exec "$venv_python" -m perf_skill observe "$@"
+subcommand="observe"
+if [[ $# -ge 1 ]]; then
+  case "$1" in
+    observe|events|exercise)
+      subcommand="$1"
+      shift
+      ;;
+  esac
+fi
+
+exec "$venv_python" -m perf_skill "$subcommand" "$@"

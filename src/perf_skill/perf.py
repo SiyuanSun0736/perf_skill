@@ -145,6 +145,7 @@ def build_perf_record_command(
     *,
     output_path: str,
     duration_sec: int | None = None,
+    call_graph: bool = False,
     group_mode: str = "auto",
     pmu_slots: int | None = None,
     groups: tuple[tuple[str, ...], ...] | None = None,
@@ -154,16 +155,17 @@ def build_perf_record_command(
         group_mode=group_mode,
         pmu_slots=pmu_slots,
     )
-    command = [
-        "perf",
-        "record",
+    command = ["perf", "record"]
+    if call_graph:
+        command.append("-g")
+    command.extend([
         "-o",
         output_path,
         "-e",
         build_group_expression(resolved_groups),
         "-p",
         str(target.pid),
-    ]
+    ])
     if duration_sec is not None:
         command.extend(["--", "sleep", str(duration_sec)])
     return command
@@ -171,6 +173,14 @@ def build_perf_record_command(
 
 def build_perf_script_command(data_path: str) -> list[str]:
     return ["perf", "script", "-i", data_path]
+
+
+def build_perf_report_command(data_path: str) -> list[str]:
+    return ["perf", "report", "--stdio", "-i", data_path]
+
+
+def build_perf_annotate_command(data_path: str, *, symbol: str) -> list[str]:
+    return ["perf", "annotate", "--stdio", "-i", data_path, "--symbol", symbol]
 
 
 def plan_event_groups(

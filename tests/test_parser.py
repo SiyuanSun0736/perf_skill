@@ -86,13 +86,6 @@ class ParseStatementTest(unittest.TestCase):
         self.assertEqual(parsed.duration_sec, 5)
         self.assertIsNone(parsed.sample_count)
 
-    def test_parse_observation_statement_detects_event_listing_request(self) -> None:
-        parsed = parse_observation_statement("查看 cache 相关事件")
-
-        self.assertTrue(parsed.wants_event_list)
-        self.assertEqual(parsed.event_filters, ("cache",))
-        self.assertEqual(parsed.events, ())
-
     def test_parse_observation_statement_handles_compact_chinese_duration(self) -> None:
         parsed = parse_observation_statement("我要追踪node20秒内的cycles")
 
@@ -107,24 +100,27 @@ class ParseStatementTest(unittest.TestCase):
         self.assertEqual(parsed.duration_sec, 30)
         self.assertEqual(parsed.sample_count, 20)
 
-    def test_parse_observation_statement_handles_branch_event_listing_synonym(self) -> None:
-        parsed = parse_observation_statement("列出 branch 相关事件")
-
-        self.assertTrue(parsed.wants_event_list)
-        self.assertEqual(parsed.event_filters, ("branch",))
-
-    def test_parse_observation_statement_handles_pmu_event_listing_synonym(self) -> None:
-        parsed = parse_observation_statement("支持哪些 PMU 事件")
-
-        self.assertTrue(parsed.wants_event_list)
-        self.assertEqual(parsed.event_filters, ("pmu",))
-
     def test_parse_observation_statement_detects_svg_generation_request(self) -> None:
         parsed = parse_observation_statement("探测20秒node的cycles并生成图像")
 
         self.assertEqual(parsed.comm, "node")
         self.assertEqual(parsed.duration_sec, 20)
         self.assertTrue(parsed.wants_svg)
+        self.assertEqual(parsed.events, ("instructions", "cycles"))
+
+    def test_parse_observation_statement_detects_summary_request(self) -> None:
+        parsed = parse_observation_statement("追踪 node 的 cycles 并总结")
+
+        self.assertEqual(parsed.comm, "node")
+        self.assertTrue(parsed.wants_summary)
+        self.assertEqual(parsed.events, ("instructions", "cycles"))
+
+    def test_parse_observation_statement_detects_flamegraph_request(self) -> None:
+        parsed = parse_observation_statement("追踪 node 10 秒并生成火焰图")
+
+        self.assertEqual(parsed.comm, "node")
+        self.assertEqual(parsed.duration_sec, 10)
+        self.assertTrue(parsed.wants_flamegraph)
         self.assertEqual(parsed.events, ("instructions", "cycles"))
 
     def test_parse_observation_statement_detects_compact_svg_request(self) -> None:
@@ -154,6 +150,17 @@ class ParseStatementTest(unittest.TestCase):
         self.assertEqual(
             parsed.data_path,
             "out/node_targetpid4242_cycles_data_20260519T120000.data",
+        )
+
+    def test_parse_observation_statement_preserves_data_path_with_unit_like_directory_name(self) -> None:
+        parsed = parse_observation_statement(
+            "解析 /tmp/tmp96s/node_targetpid4242_cycles_data_20260519T120000.data"
+        )
+
+        self.assertTrue(parsed.wants_parse_data)
+        self.assertEqual(
+            parsed.data_path,
+            "/tmp/tmp96s/node_targetpid4242_cycles_data_20260519T120000.data",
         )
 
     def test_build_request_applies_event_override(self) -> None:

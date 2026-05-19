@@ -163,6 +163,17 @@ STOP_TOKENS = {
     "chart",
     "plot",
     "svg",
+    "summary",
+    "report",
+    "summarize",
+    "总结",
+    "摘要",
+    "报告",
+    "概览",
+    "火焰图",
+    "flamegraph",
+    "flame",
+    "graph",
 }
 
 PID_KEYS = {"pid", "process-id", "processid", "process_id", "进程", "进程号"}
@@ -176,6 +187,15 @@ EVENT_FAMILIES: tuple[tuple[str, ...], ...] = (
     ("cache-references", "cache-misses"),
 )
 PREVIEW_HINT_TOKENS = ("dry-run", "dryrun", "preview", "预览", "模拟")
+SUMMARY_HINT_TOKENS = (
+    "summary",
+    "report",
+    "summarize",
+    "总结",
+    "摘要",
+    "报告",
+    "概览",
+)
 SVG_HINT_PATTERNS = (
     re.compile(r"(生成|导出|输出|保存|绘制|画出).*(图像|图片|图表|曲线图|趋势图|svg)"),
     re.compile(r"(图像|图片|图表|曲线图|趋势图|svg)"),
@@ -189,11 +209,10 @@ PERF_DATA_PARSE_HINT_PATTERNS = (
     re.compile(r"(解析|分析).*(perf\.data|\.data\b|data文件|data file)"),
     re.compile(r"\b(parse|analyze)\b.*\b(perf\.data|data)\b"),
 )
-LIST_EVENT_HINT_PATTERNS = (
-    re.compile(r"\bperf\s+list\b"),
-    re.compile(r"\b(list|show|view)\b.*\b(events?)\b"),
-    re.compile(r"(查看|列出|显示).*(事件|硬件事件)"),
-    re.compile(r"((有\s*哪些)|(支持\s*哪些)).*(pmu|events?|事件|硬件事件)"),
+FLAMEGRAPH_HINT_PATTERNS = (
+    re.compile(r"火焰\s*图"),
+    re.compile(r"\bflame\s*graph\b"),
+    re.compile(r"\bflamegraph\b"),
 )
 SAMPLE_PATTERNS = (
     re.compile(r"(?<!\d)(\d+)\s*(?:samples?|sample)\b"),
@@ -227,12 +246,12 @@ class ParsedObservation:
     sample_count: int | None
     duration_sec: int | None
     wants_dry_run: bool
+    wants_summary: bool
     wants_svg: bool
+    wants_flamegraph: bool
     wants_perf_data: bool
     wants_parse_data: bool
     data_path: str | None
-    wants_event_list: bool
-    event_filters: tuple[str, ...]
 
 
 def build_request(
@@ -285,22 +304,23 @@ def parse_observation_statement(statement: str) -> ParsedObservation:
             sample_count=None,
             duration_sec=None,
             wants_dry_run=False,
+            wants_summary=False,
             wants_svg=False,
+            wants_flamegraph=False,
             wants_perf_data=False,
             wants_parse_data=False,
             data_path=None,
-            wants_event_list=False,
-            event_filters=(),
         )
 
     sample_count = _extract_count_hint(statement, SAMPLE_PATTERNS, label="samples")
     duration_sec = _extract_count_hint(statement, DURATION_PATTERNS, label="seconds")
     wants_dry_run = _has_hint(statement, PREVIEW_HINT_TOKENS)
+    wants_summary = _has_hint(statement, SUMMARY_HINT_TOKENS)
     wants_svg = _has_svg_intent(statement)
+    wants_flamegraph = _has_flamegraph_intent(statement)
     wants_perf_data = _has_perf_data_record_intent(statement)
     wants_parse_data = _has_perf_data_parse_intent(statement)
     data_path = _extract_data_path(statement)
-    wants_event_list = _has_list_event_intent(statement)
 
     tokens = shlex.split(statement)
     pid: int | None = None
@@ -377,8 +397,6 @@ def parse_observation_statement(statement: str) -> ParsedObservation:
     for token in unknowns:
         if not token:
             continue
-        if wants_event_list:
-            continue
         if pid is None and token.isdigit():
             pid = int(token)
             continue
@@ -386,7 +404,7 @@ def parse_observation_statement(statement: str) -> ParsedObservation:
             comm = token
 
     mentioned_events = tuple(dict.fromkeys(events))
-    resolved_events = normalize_events(tuple(events)) if events or not wants_event_list else ()
+    resolved_events = normalize_events(tuple(events))
 
     return ParsedObservation(
         pid=pid,
@@ -396,12 +414,12 @@ def parse_observation_statement(statement: str) -> ParsedObservation:
         sample_count=sample_count,
         duration_sec=duration_sec,
         wants_dry_run=wants_dry_run,
+        wants_summary=wants_summary,
         wants_svg=wants_svg,
+        wants_flamegraph=wants_flamegraph,
         wants_perf_data=wants_perf_data,
         wants_parse_data=wants_parse_data,
         data_path=data_path,
-        wants_event_list=wants_event_list,
-        event_filters=_build_event_filters(mentioned_events, unknowns),
     )
 
 
@@ -485,7 +503,7 @@ def _normalize_statement(statement: str) -> str:
     normalized = re.sub(r"(?<=[\u4e00-\u9fff])(?=[A-Za-z0-9])", " ", normalized)
     normalized = re.sub(r"(?<=[A-Za-z0-9])(?=[\u4e00-\u9fff])", " ", normalized)
     normalized = re.sub(
-        r"([A-Za-z][A-Za-z0-9_.-]*?)(\d+)(?=\s*(?:秒钟?|s\b|sec\b|secs\b|second\b|seconds\b|sample\b|samples\b|样本|次\b))",
+        r"(?:(?<=\s)|^)([A-Za-z][A-Za-z0-9_.-]*?)(\d+)(?=\s*(?:秒钟?|s\b|sec\b|secs\b|second\b|seconds\b|sample\b|samples\b|样本|次\b))",
         r"\1 \2",
         normalized,
         flags=re.IGNORECASE,
@@ -504,6 +522,11 @@ def _has_svg_intent(statement: str) -> bool:
     return any(pattern.search(lowered) for pattern in SVG_HINT_PATTERNS)
 
 
+def _has_flamegraph_intent(statement: str) -> bool:
+    lowered = statement.lower()
+    return any(pattern.search(lowered) for pattern in FLAMEGRAPH_HINT_PATTERNS)
+
+
 def _has_perf_data_record_intent(statement: str) -> bool:
     lowered = statement.lower()
     return any(pattern.search(lowered) for pattern in PERF_DATA_RECORD_HINT_PATTERNS)
@@ -512,11 +535,6 @@ def _has_perf_data_record_intent(statement: str) -> bool:
 def _has_perf_data_parse_intent(statement: str) -> bool:
     lowered = statement.lower()
     return any(pattern.search(lowered) for pattern in PERF_DATA_PARSE_HINT_PATTERNS)
-
-
-def _has_list_event_intent(statement: str) -> bool:
-    lowered = statement.lower()
-    return any(pattern.search(lowered) for pattern in LIST_EVENT_HINT_PATTERNS)
 
 
 def _extract_count_hint(
@@ -624,35 +642,6 @@ def _parse_duration_value(raw_value: str) -> int:
     if match is None:
         raise ObservationError(f"invalid seconds value: {raw_value}")
     return _parse_positive_int(match.group(1), label="seconds")
-
-
-def _build_event_filters(
-    mentioned_events: tuple[str, ...],
-    unknowns: list[str],
-) -> tuple[str, ...]:
-    filters: list[str] = [_event_filter_term(event) for event in mentioned_events]
-    seen = set(filters)
-    for token in unknowns:
-        cleaned = _clean_value(token).lower().replace("_", "-")
-        if not cleaned or cleaned.isdigit():
-            continue
-        if cleaned in ACTION_TOKENS or cleaned in STOP_TOKENS:
-            continue
-        if cleaned in PID_KEYS or cleaned in COMM_KEYS or cleaned in EVENT_KEYS:
-            continue
-        if cleaned.endswith("事件"):
-            continue
-        if cleaned not in seen:
-            filters.append(cleaned)
-            seen.add(cleaned)
-    return tuple(filters)
-
-
-def _event_filter_term(event: str) -> str:
-    return {
-        "branches": "branch",
-        "cache-references": "cache",
-    }.get(event, event)
 
 
 def _looks_like_tracepoint_event(raw_token: str) -> bool:
