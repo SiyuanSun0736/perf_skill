@@ -64,16 +64,20 @@ def write_svg_report(
     request: ObservationRequest,
     target: TargetProcess,
     samples: list[PerfSample],
+    *,
+    show_legend: bool = True,
 ) -> None:
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(render_svg_report(request, target, samples), encoding="utf-8")
+    path.write_text(render_svg_report(request, target, samples, show_legend=show_legend), encoding="utf-8")
 
 
 def render_svg_report(
     request: ObservationRequest,
     target: TargetProcess,
     samples: list[PerfSample],
+    *,
+    show_legend: bool = True,
 ) -> str:
     width = 1200
     margin_left = 84
@@ -87,6 +91,12 @@ def render_svg_report(
     if not series:
         return _render_empty_svg(width, target)
 
+    legend_height = 0
+    legend_top = margin_top + 16
+    if show_legend:
+        legend_height = _estimate_legend_height(series, width, margin_left)
+        margin_top += legend_height
+
     height = margin_top + len(series) * panel_height + (len(series) - 1) * panel_gap + 40
     start_time = samples[0].timestamp_sec
     end_time = samples[-1].timestamp_sec
@@ -98,6 +108,9 @@ def render_svg_report(
         f'<text x="{margin_left}" y="32" font-size="22" font-family="monospace" fill="#0f172a">perf-skill timeline for pid={target.pid} comm={html.escape(target.comm)}</text>',
         f'<text x="{margin_left}" y="50" font-size="12" font-family="monospace" fill="#475569">events: {html.escape(", ".join(request.events))}</text>',
     ]
+
+    if show_legend:
+        lines.extend(_render_legend(series, left=margin_left, top=legend_top, width=width))
 
     for index, (name, points) in enumerate(series):
         top = margin_top + index * (panel_height + panel_gap)
@@ -164,6 +177,53 @@ def _render_empty_svg(width: int, target: TargetProcess) -> str:
         '<text x="64" y="108" font-size="14" font-family="monospace" fill="#64748b">No samples were captured, so no timeline could be drawn.</text>',
         '</svg>',
     ])
+
+
+def _render_legend(
+    series: list[tuple[str, list[tuple[float, float]]]],
+    *,
+    left: int,
+    top: int,
+    width: int,
+) -> list[str]:
+    lines = ['<g id="legend">']
+    x = left
+    y = top
+    max_x = width - 64
+    line_height = 20
+
+    for index, (name, _) in enumerate(series):
+        label_width = 28 + max(56, len(name) * 8)
+        if x + label_width > max_x:
+            x = left
+            y += line_height
+        color = SERIES_COLORS[index % len(SERIES_COLORS)]
+        lines.append(f'<rect x="{x}" y="{y - 10}" width="12" height="12" rx="3" fill="{color}" />')
+        lines.append(
+            f'<text x="{x + 18}" y="{y}" font-size="12" font-family="monospace" fill="#334155">{html.escape(name)}</text>'
+        )
+        x += label_width
+
+    lines.append('</g>')
+    return lines
+
+
+def _estimate_legend_height(
+    series: list[tuple[str, list[tuple[float, float]]]],
+    width: int,
+    left: int,
+) -> int:
+    x = left
+    y = 0
+    max_x = width - 64
+    line_height = 20
+    for name, _ in series:
+        label_width = 28 + max(56, len(name) * 8)
+        if x + label_width > max_x:
+            x = left
+            y += line_height
+        x += label_width
+    return 24 + y
 
 
 def _render_series_panel(

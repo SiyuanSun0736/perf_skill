@@ -7,7 +7,7 @@ import sys
 from perf_skill.export import CsvSampleWriter, write_svg_report
 from perf_skill.models import ObservationError, PerfSample, PerfStatError
 from perf_skill.parser import build_request
-from perf_skill.perf import build_perf_command, detect_pmu_slot_limit, plan_event_groups, stream_perf_samples
+from perf_skill.perf import build_perf_command, build_retry_plans, detect_pmu_slot_limit, format_retry_notice, format_retry_plan, plan_event_groups, stream_perf_samples
 from perf_skill.processes import resolve_target
 from perf_skill.ui import DashboardRenderer
 
@@ -96,6 +96,25 @@ def _build_parser() -> argparse.ArgumentParser:
         "--svg-out",
         help="write a stacked SVG time-series report after sampling finishes",
     )
+    observe_parser.add_argument(
+        "--svg-legend",
+        dest="svg_legend",
+        action="store_true",
+        help="include a color legend in the SVG export",
+    )
+    observe_parser.add_argument(
+        "--no-svg-legend",
+        dest="svg_legend",
+        action="store_false",
+        help="omit the color legend from the SVG export",
+    )
+    observe_parser.add_argument(
+        "--no-group-retry",
+        dest="group_retry",
+        action="store_false",
+        help="disable adaptive retries that split groups further after retryable perf failures",
+    )
+    observe_parser.set_defaults(svg_legend=True, group_retry=True)
     observe_parser.set_defaults(handler=_handle_observe)
     return parser
 
@@ -113,6 +132,11 @@ def _handle_observe(args: argparse.Namespace) -> int:
         history_size=args.history,
     )
     target = resolve_target(request)
+    retry_plans = build_retry_plans(
+        group_mode=args.group_mode,
+        pmu_slots=pmu_slots,
+        retry_grouping=args.group_retry,
+    )
     command = build_perf_command(
         request,
         target,
@@ -132,6 +156,7 @@ def _handle_observe(args: argparse.Namespace) -> int:
         print(f"group-mode: {args.group_mode}")
         print(f"pmu-slots : {args.pmu_slots} (resolved {resolved_pmu_slots})")
         print(f"groups    : {' | '.join(', '.join(group) for group in event_groups)}")
+        print(f"retries   : {format_retry_plan(retry_plans) if args.group_retry else 'disabled'}")
         print(f"interval  : {request.interval_ms} ms")
         print(f"command   : {shlex.join(command)}")
         return 0
@@ -142,6 +167,8 @@ def _handle_observe(args: argparse.Namespace) -> int:
         target,
         group_mode=args.group_mode,
         pmu_slots=pmu_slots,
+        retry_grouping=args.group_retry,
+        on_retry=_emit_retry_notice,
     )
     csv_writer = CsvSampleWriter(args.csv_out, request, target) if args.csv_out else None
     svg_samples: list[PerfSample] = [] if args.svg_out else []
@@ -165,7 +192,7 @@ def _handle_observe(args: argparse.Namespace) -> int:
             csv_writer.close()
 
     if args.svg_out:
-        write_svg_report(args.svg_out, request, target, svg_samples)
+        write_svg_report(args.svg_out, request, target, svg_samples, show_legend=args.svg_legend)
     if args.csv_out:
         print(f"csv-out   : {args.csv_out}")
     if args.svg_out:
@@ -182,3 +209,7 @@ def _parse_pmu_slots_arg(raw_value: str) -> int | None:
     if not lowered.isdigit() or int(lowered) <= 0:
         raise ObservationError("pmu-slots must be 'auto' or a positive integer")
     return int(lowered)
+
+
+def _emit_retry_notice(current_plan, next_plan, error: PerfStatError) -> None:
+    print(format_retry_notice(current_plan, next_plan, error), file=sys.stderr)

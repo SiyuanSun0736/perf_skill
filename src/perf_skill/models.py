@@ -10,6 +10,19 @@ class ObservationError(ValueError):
 class PerfStatError(RuntimeError):
     """Raised when perf cannot be started or its output cannot be consumed."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        kind: str = "generic",
+        diagnostics: tuple[str, ...] = (),
+        unsupported_events: dict[str, str] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.kind = kind
+        self.diagnostics = diagnostics
+        self.unsupported_events = dict(unsupported_events or {})
+
 
 @dataclass(frozen=True)
 class ObservationRequest:

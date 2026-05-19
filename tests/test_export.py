@@ -66,3 +66,30 @@ class ExportHelpersTest(unittest.TestCase):
         self.assertIn("cycles", svg)
         self.assertIn("ipc", svg)
         self.assertIn("polyline", svg)
+
+    def test_render_svg_report_without_legend(self) -> None:
+        request = ObservationRequest(
+            statement="trace pid=4242 inst cycles",
+            pid=4242,
+            comm="python",
+            events=("instructions", "cycles"),
+            interval_ms=1000,
+            history_size=20,
+        )
+        target = TargetProcess(pid=4242, comm="python")
+        samples = [
+            PerfSample(
+                timestamp_sec=1716100000.0,
+                values={"instructions": 1000.0, "cycles": 2000.0},
+                ipc=0.5,
+            ),
+            PerfSample(
+                timestamp_sec=1716100001.0,
+                values={"instructions": 1400.0, "cycles": 2200.0},
+                ipc=0.6363636,
+            ),
+        ]
+
+        svg = render_svg_report(request, target, samples, show_legend=False)
+
+        self.assertNotIn('id="legend"', svg)

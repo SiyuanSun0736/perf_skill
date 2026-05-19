@@ -17,6 +17,7 @@ without manually writing `perf stat` arguments.
 - Supports live sampling with IPC derived from `instructions / cycles`
 - Auto-completes missing event pairs and auto-splits groups against a PMU slot limit
 - Can export CSV and SVG timeline artifacts during sampling
+- Retries with smaller groups when perf returns retryable grouped-event failures
 
 ## When to Use
 
@@ -29,7 +30,7 @@ without manually writing `perf stat` arguments.
 
 1. Take the user's sentence as the observation statement.
 2. If the target is ambiguous or the user wants inspection only, run a dry run first with [run-observe.sh](./scripts/run-observe.sh).
-3. For a real attach, run [run-observe.sh](./scripts/run-observe.sh) with the statement and any needed flags such as `--plain`, `--samples`, `--dry-run`, `--csv-out`, `--svg-out`, or `--pmu-slots`.
+3. For a real attach, run [run-observe.sh](./scripts/run-observe.sh) with the statement and any needed flags such as `--plain`, `--samples`, `--dry-run`, `--csv-out`, `--svg-out`, `--pmu-slots`, `--no-group-retry`, or `--no-svg-legend`.
 4. Report the resolved target, the events, the generated `perf` command for dry runs, and the resulting IPC for live runs.
 5. If `perf` reports permission, unsupported PMU, or `<not counted>` errors, surface that diagnostic directly.
 

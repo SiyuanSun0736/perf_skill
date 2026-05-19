@@ -14,6 +14,7 @@ recent history charts.
 - Auto-completes missing paired counters such as `branches + branch-misses` and `cache-references + cache-misses`
 - Auto-groups related events into perf groups so IPC, branch, and cache counters stay aligned
 - Auto-splits groups against a PMU slot limit, with local hardware hints and vendor fallbacks
+- Automatically retries with smaller groups when perf reports retryable grouped-event failures
 - Starts `perf stat` with interval sampling and parses the live CSV output
 - Can export time-series samples as CSV and stacked SVG charts
 - Renders a rolling terminal dashboard with current counters and ASCII charts
@@ -46,6 +47,11 @@ Use `--pmu-slots auto` to let the CLI pick a group size limit from local PMU
 metadata when available, then fall back to vendor heuristics such as `4` for
 common Intel cores and `6` for modern AMD Zen families. You can override this
 with an explicit integer such as `--pmu-slots 4`.
+
+If grouped collection fails with retryable `perf` diagnostics such as
+`<not counted>` or grouped counter scheduling errors, the CLI now retries with
+smaller `pmu-slots` values and finally falls back to ungrouped collection unless
+you disable that behavior with `--no-group-retry`.
 
 ## Supported statement forms
 
@@ -99,6 +105,8 @@ perf-skill observe "trace pid=4242 inst cycles branches" \
 
 The CSV contains one row per interval sample. The SVG is a stacked time-series
 report with one panel per metric plus IPC when available.
+
+Use `--no-svg-legend` if you want a more compact SVG without the color legend.
 
 ## Notes
 
