@@ -68,3 +68,27 @@ Run the unit tests:
 ```bash
 python -m unittest discover -s tests
 ```
+
+## IDE usage
+
+This repository also includes a Copilot Skill at
+`.github/skills/hardware-event-observe/` so you can trigger the local CLI from
+ VS Code chat with a natural-language request.
+
+Example invocations:
+
+```text
+/hardware-event-observe 追踪 comm=node pid=16874 的 inst 和 cycles
+/hardware-event-observe observe pid=16874 cache-misses branches
+```
+
+The skill delegates to the local helper script:
+
+```bash
+bash .github/skills/hardware-event-observe/scripts/run-observe.sh \
+	"trace pid=16874 inst cycles" --samples 5 --plain
+```
+
+The script keeps the invocation inside this repository and uses `python3` with
+`PYTHONPATH=src`, which matches the environment validated in this workspace.
+
