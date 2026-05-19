@@ -129,6 +129,8 @@ perf-skill observe "trace pid=4242 inst cycles branches" \
 
 CSV 是每个采样区间一行。SVG 是一个按指标分面板堆叠的时序报告，若 IPC 可计算，也会单独画出来。
 
+现在 SVG 图是通过 matplotlib 渲染的，而不是手写 XML，因此图表观感和后续维护性都会更好。
+
 如果你想让 SVG 更紧凑，可以关闭图例：
 
 ```bash

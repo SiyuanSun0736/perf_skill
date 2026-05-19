@@ -62,10 +62,12 @@ class ExportHelpersTest(unittest.TestCase):
         svg = render_svg_report(request, target, samples)
 
         self.assertIn("<svg", svg)
+        self.assertIn("perf-skill-renderer:matplotlib", svg)
+        self.assertIn("perf-skill-legend:on", svg)
         self.assertIn("instructions", svg)
         self.assertIn("cycles", svg)
         self.assertIn("ipc", svg)
-        self.assertIn("polyline", svg)
+        self.assertIn("path", svg)
 
     def test_render_svg_report_without_legend(self) -> None:
         request = ObservationRequest(
@@ -92,4 +94,6 @@ class ExportHelpersTest(unittest.TestCase):
 
         svg = render_svg_report(request, target, samples, show_legend=False)
 
-        self.assertNotIn('id="legend"', svg)
+        self.assertIn("perf-skill-renderer:matplotlib", svg)
+        self.assertIn("perf-skill-legend:off", svg)
+        self.assertNotIn("perf-skill-legend:on", svg)

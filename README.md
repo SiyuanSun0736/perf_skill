@@ -118,6 +118,9 @@ perf-skill observe "trace pid=4242 inst cycles branches" \
 The CSV contains one row per interval sample. The SVG is a stacked time-series
 report with one panel per metric plus IPC when available.
 
+SVG charts are rendered with matplotlib instead of hand-written XML, so the
+output is easier to read and closer to a normal plotting workflow.
+
 Use `--no-svg-legend` if you want a more compact SVG without the color legend.
 
 ## Packaging and releases

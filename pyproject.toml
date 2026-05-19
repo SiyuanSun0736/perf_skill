@@ -23,7 +23,9 @@ classifiers = [
   "Topic :: Software Development :: Testing",
   "Topic :: System :: Monitoring",
 ]
-dependencies = []
+dependencies = [
+  "matplotlib>=3.8",
+]
 
 [project.optional-dependencies]
 dev = [
