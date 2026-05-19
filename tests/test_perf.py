@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 
 from perf_skill.models import ObservationRequest, TargetProcess
-from perf_skill.perf import build_perf_command, parse_perf_csv_line, parse_perf_status_line
+from perf_skill.perf import build_perf_command, parse_perf_csv_line, parse_perf_status_line, plan_event_groups
 
 
 class PerfHelpersTest(unittest.TestCase):
@@ -31,10 +31,36 @@ class PerfHelpersTest(unittest.TestCase):
                 "-x",
                 ",",
                 "-e",
-                "instructions,cycles",
+                "{instructions,cycles}",
                 "-p",
                 "4242",
             ],
+        )
+
+    def test_build_perf_command_group_off(self) -> None:
+        request = ObservationRequest(
+            statement="trace python 4242 inst cycles cache-misses",
+            pid=4242,
+            comm="python",
+            events=("instructions", "cycles", "cache-misses"),
+            interval_ms=1000,
+            history_size=20,
+        )
+        target = TargetProcess(pid=4242, comm="python")
+
+        command = build_perf_command(request, target, group_mode="off")
+
+        self.assertEqual(command[8], "instructions,cycles,cache-misses")
+
+    def test_plan_event_groups_auto(self) -> None:
+        groups = plan_event_groups(
+            ("instructions", "cycles", "cache-misses", "branches", "branch-misses"),
+            group_mode="auto",
+        )
+
+        self.assertEqual(
+            groups,
+            (("instructions", "cycles", "cache-misses"), ("branches", "branch-misses")),
         )
 
     def test_parse_perf_csv_line(self) -> None:

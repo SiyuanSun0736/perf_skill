@@ -11,6 +11,7 @@ recent history charts.
 - Resolves the target process from `pid`, `comm`, or both
 - Expands event aliases such as `inst -> instructions`
 - Always injects `instructions` and `cycles` so IPC can be derived alongside any extra events
+- Auto-groups related events into perf groups so IPC, branch, and cache counters stay aligned
 - Starts `perf stat` with interval sampling and parses the live CSV output
 - Renders a rolling terminal dashboard with current counters and ASCII charts
 
@@ -29,6 +30,14 @@ Use `--dry-run` first if you want to inspect the resolved request and generated
 ```bash
 perf-skill observe "trace python 4242 inst" --dry-run
 ```
+
+By default, the CLI uses `--group-mode auto` and emits `perf stat -e` groups such
+as `{instructions,cycles,cache-misses}` or
+`{instructions,cycles},{branches,branch-misses}`. This keeps related counters in
+the same perf group without forcing everything into one oversized event set.
+
+Use `--group-mode off` if you want the raw ungrouped event list, or
+`--group-mode always` if you want every event list chunked into groups.
 
 ## Supported statement forms
 
@@ -53,6 +62,13 @@ Recognized event aliases:
 
 Even if you request only `cache-misses` or `branches`, the tool still keeps
 `instructions` and `cycles` in the perf event set so IPC remains available.
+
+Auto grouping rules:
+
+- `instructions` and `cycles` stay in the same core group
+- `branches` and `branch-misses` are grouped together when both are present
+- `cache-references` and `cache-misses` are grouped together when both are present
+- Single leftover events are merged into an existing group when there is room
 
 ## Notes
 

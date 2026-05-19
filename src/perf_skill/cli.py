@@ -6,7 +6,7 @@ import sys
 
 from perf_skill.models import ObservationError, PerfStatError
 from perf_skill.parser import build_request
-from perf_skill.perf import build_perf_command, stream_perf_samples
+from perf_skill.perf import build_perf_command, plan_event_groups, stream_perf_samples
 from perf_skill.processes import resolve_target
 from perf_skill.ui import DashboardRenderer
 
@@ -76,6 +76,12 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="disable the dashboard and print one line per sample",
     )
+    observe_parser.add_argument(
+        "--group-mode",
+        choices=("auto", "always", "off"),
+        default="auto",
+        help="event grouping strategy: auto groups related counters, always chunks all counters, off disables grouping",
+    )
     observe_parser.set_defaults(handler=_handle_observe)
     return parser
 
@@ -91,18 +97,21 @@ def _handle_observe(args: argparse.Namespace) -> int:
         history_size=args.history,
     )
     target = resolve_target(request)
-    command = build_perf_command(request, target)
+    command = build_perf_command(request, target, group_mode=args.group_mode)
+    event_groups = plan_event_groups(request.events, group_mode=args.group_mode)
 
     if args.dry_run:
         print(f"statement : {request.statement or '<empty>'}")
         print(f"target    : pid={target.pid} comm={target.comm}")
         print(f"events    : {', '.join(request.events)}")
+        print(f"group-mode: {args.group_mode}")
+        print(f"groups    : {' | '.join(', '.join(group) for group in event_groups)}")
         print(f"interval  : {request.interval_ms} ms")
         print(f"command   : {shlex.join(command)}")
         return 0
 
     renderer = DashboardRenderer(request, target, plain_output=args.plain)
-    sample_stream = stream_perf_samples(request, target)
+    sample_stream = stream_perf_samples(request, target, group_mode=args.group_mode)
     sample_count = 0
     try:
         for sample in sample_stream:
