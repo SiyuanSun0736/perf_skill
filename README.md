@@ -24,9 +24,11 @@ recent history charts.
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-pip install -e .
+pip install .
 perf-skill observe "trace comm=python pid=4242 inst cycles"
 ```
+
+For editable local development, use `pip install -e .[dev]` instead.
 
 Use `--dry-run` first if you want to inspect the resolved request and generated
 `perf` command without attaching to the process.
@@ -51,7 +53,15 @@ with an explicit integer such as `--pmu-slots 4`.
 If grouped collection fails with retryable `perf` diagnostics such as
 `<not counted>` or grouped counter scheduling errors, the CLI now retries with
 smaller `pmu-slots` values and finally falls back to ungrouped collection unless
-you disable that behavior with `--no-group-retry`.
+you disable that behavior with `--no-group-retry`. Successful groups keep their
+current layout while only the failing group is split further.
+
+You can inspect the full CLI reference with:
+
+```bash
+perf-skill --help
+perf-skill observe --help
+```
 
 ## Supported statement forms
 
@@ -107,6 +117,26 @@ The CSV contains one row per interval sample. The SVG is a stacked time-series
 report with one panel per metric plus IPC when available.
 
 Use `--no-svg-legend` if you want a more compact SVG without the color legend.
+
+## Packaging and releases
+
+Build a local wheel and sdist:
+
+```bash
+python -m pip install -e .[dev]
+python -m build
+```
+
+Install the generated wheel locally:
+
+```bash
+pip install dist/perf_skill-*.whl
+```
+
+This repository includes a tag-driven GitHub Actions workflow at
+`.github/workflows/release.yml`. Pushing a tag such as `v0.5.0` builds the wheel
+and sdist, uploads them as workflow artifacts, and attaches them to a GitHub
+release.
 
 ## Notes
 

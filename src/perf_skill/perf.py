@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import queue
+import threading
 from collections.abc import Callable
 from functools import lru_cache
 from pathlib import Path
@@ -30,6 +32,44 @@ class PerfStatus:
 class PerfRunPlan:
     group_mode: str
     pmu_slots: int
+
+
+@dataclass(frozen=True)
+class PerfGroupTask:
+    worker_id: int
+    group: tuple[str, ...]
+    pmu_slots: int
+
+
+@dataclass(frozen=True)
+class _GroupSampleMessage:
+    task: PerfGroupTask
+    sample: PerfSample
+
+
+@dataclass(frozen=True)
+class _GroupRetryMessage:
+    task: PerfGroupTask
+    child_groups: tuple[tuple[str, ...], ...]
+    next_pmu_slots: int
+    error: PerfStatError
+
+
+@dataclass(frozen=True)
+class _GroupDoneMessage:
+    task: PerfGroupTask
+
+
+@dataclass(frozen=True)
+class _GroupErrorMessage:
+    task: PerfGroupTask
+    error: PerfStatError
+
+
+@dataclass
+class _PendingSampleBucket:
+    timestamp_sec: float
+    values: dict[str, float]
 
 
 GROUP_FAMILIES: tuple[tuple[str, ...], ...] = (
@@ -63,7 +103,13 @@ def build_perf_command(
     *,
     group_mode: str = "auto",
     pmu_slots: int | None = None,
+    groups: tuple[tuple[str, ...], ...] | None = None,
 ) -> list[str]:
+    resolved_groups = groups or plan_event_groups(
+        request.events,
+        group_mode=group_mode,
+        pmu_slots=pmu_slots,
+    )
     return [
         "perf",
         "stat",
@@ -73,7 +119,7 @@ def build_perf_command(
         "-x",
         ",",
         "-e",
-        build_event_expression(request.events, group_mode=group_mode, pmu_slots=pmu_slots),
+        build_group_expression(resolved_groups),
         "-p",
         str(target.pid),
     ]
@@ -105,6 +151,10 @@ def build_event_expression(
     pmu_slots: int | None = None,
 ) -> str:
     groups = plan_event_groups(events, group_mode=group_mode, pmu_slots=pmu_slots)
+    return build_group_expression(groups)
+
+
+def build_group_expression(groups: Iterable[tuple[str, ...]]) -> str:
     rendered_groups: list[str] = []
     for group in groups:
         if len(group) == 1:
@@ -121,43 +171,151 @@ def stream_perf_samples(
     group_mode: str = "auto",
     pmu_slots: int | None = None,
     retry_grouping: bool = True,
-    on_retry: Callable[[PerfRunPlan, PerfRunPlan, PerfStatError], None] | None = None,
+    on_retry: Callable[[str], None] | None = None,
 ) -> Iterator[PerfSample]:
-    plans = build_retry_plans(
+    resolved_pmu_slots = resolve_pmu_slot_limit(pmu_slots)
+    initial_groups = plan_event_groups(
+        request.events,
         group_mode=group_mode,
-        pmu_slots=pmu_slots,
-        retry_grouping=retry_grouping,
+        pmu_slots=resolved_pmu_slots,
     )
+    merge_tolerance = max(request.interval_ms / 1000.0 / 4.0, 0.1)
+    message_queue: queue.Queue[
+        _GroupSampleMessage | _GroupRetryMessage | _GroupDoneMessage | _GroupErrorMessage
+    ] = queue.Queue()
+    stop_event = threading.Event()
+    threads: dict[int, threading.Thread] = {}
+    pending_buckets: list[_PendingSampleBucket] = []
+    active_workers = 0
+    next_worker_id = 0
+    fatal_error: PerfStatError | None = None
 
-    for index, plan in enumerate(plans):
-        emitted_samples = False
-        try:
-            for sample in _stream_perf_attempt(
+    def spawn_group(group: tuple[str, ...], group_pmu_slots: int) -> None:
+        nonlocal active_workers, next_worker_id
+        task = PerfGroupTask(
+            worker_id=next_worker_id,
+            group=group,
+            pmu_slots=group_pmu_slots,
+        )
+        next_worker_id += 1
+        thread = threading.Thread(
+            target=_run_group_task,
+            args=(
                 request,
                 target,
-                group_mode=plan.group_mode,
-                pmu_slots=plan.pmu_slots,
-            ):
-                emitted_samples = True
-                yield sample
+                task,
+                message_queue,
+                stop_event,
+                retry_grouping,
+            ),
+            daemon=True,
+        )
+        threads[task.worker_id] = thread
+        active_workers += 1
+        thread.start()
+
+    for group in initial_groups:
+        spawn_group(group, resolved_pmu_slots)
+
+    try:
+        while active_workers > 0:
+            message = message_queue.get()
+            if isinstance(message, _GroupSampleMessage):
+                _add_partial_sample(pending_buckets, message.sample, tolerance=merge_tolerance)
+                for ready_sample in _pop_ready_samples(
+                    pending_buckets,
+                    newest_timestamp=message.sample.timestamp_sec,
+                    tolerance=merge_tolerance,
+                ):
+                    yield ready_sample
+                continue
+
+            if isinstance(message, _GroupRetryMessage):
+                active_workers -= 1
+                if on_retry is not None:
+                    on_retry(format_group_retry_notice(message.task, message.child_groups, message.error))
+                for child_group in message.child_groups:
+                    spawn_group(child_group, message.next_pmu_slots)
+                continue
+
+            if isinstance(message, _GroupDoneMessage):
+                active_workers -= 1
+                continue
+
+            if isinstance(message, _GroupErrorMessage):
+                active_workers -= 1
+                fatal_error = message.error
+                stop_event.set()
+                break
+
+        for ready_sample in _drain_pending_samples(pending_buckets):
+            yield ready_sample
+
+        if fatal_error is not None:
+            raise fatal_error
+    finally:
+        stop_event.set()
+        join_timeout = max(request.interval_ms / 1000.0, 0.2)
+        for thread in threads.values():
+            thread.join(timeout=join_timeout)
+
+
+def _run_group_task(
+    request: ObservationRequest,
+    target: TargetProcess,
+    task: PerfGroupTask,
+    message_queue: queue.Queue[
+        _GroupSampleMessage | _GroupRetryMessage | _GroupDoneMessage | _GroupErrorMessage
+    ],
+    stop_event: threading.Event,
+    retry_grouping: bool,
+) -> None:
+    if stop_event.is_set():
+        return
+
+    emitted_samples = False
+    group_request = _build_group_request(request, task.group)
+    try:
+        for sample in _stream_perf_attempt(
+            group_request,
+            target,
+            groups=(task.group,),
+            stop_event=stop_event,
+        ):
+            if stop_event.is_set():
+                return
+            emitted_samples = True
+            message_queue.put(_GroupSampleMessage(task=task, sample=sample))
+    except PerfStatError as error:
+        if stop_event.is_set():
             return
-        except PerfStatError as error:
-            is_last_plan = index == len(plans) - 1
-            if emitted_samples or is_last_plan or not _is_retryable_grouping_error(error):
-                raise
-            next_plan = plans[index + 1]
-            if on_retry is not None:
-                on_retry(plan, next_plan, error)
+        retry_plan = _plan_group_retry(task, error, retry_grouping=retry_grouping)
+        if not emitted_samples and retry_plan is not None:
+            child_groups, next_pmu_slots = retry_plan
+            message_queue.put(
+                _GroupRetryMessage(
+                    task=task,
+                    child_groups=child_groups,
+                    next_pmu_slots=next_pmu_slots,
+                    error=error,
+                )
+            )
+            return
+        message_queue.put(_GroupErrorMessage(task=task, error=error))
+        return
+
+    if not stop_event.is_set():
+        message_queue.put(_GroupDoneMessage(task=task))
 
 
 def _stream_perf_attempt(
     request: ObservationRequest,
     target: TargetProcess,
     *,
-    group_mode: str,
-    pmu_slots: int | None,
+    groups: tuple[tuple[str, ...], ...] | None = None,
+    stop_event: threading.Event | None = None,
 ) -> Iterator[PerfSample]:
-    command = build_perf_command(request, target, group_mode=group_mode, pmu_slots=pmu_slots)
+    command = build_perf_command(request, target, groups=groups)
     interval_tolerance = max(request.interval_ms / 1000.0 / 5.0, 0.05)
 
     try:
@@ -179,6 +337,8 @@ def _stream_perf_attempt(
     try:
         assert process.stdout is not None
         for raw_line in process.stdout:
+            if stop_event is not None and stop_event.is_set():
+                break
             line = raw_line.strip()
             if not line:
                 continue
@@ -213,6 +373,8 @@ def _stream_perf_attempt(
                 )
 
         return_code = process.wait()
+        if stop_event is not None and stop_event.is_set():
+            return
         if pending_timestamp is not None and pending_values:
             yield _build_sample(pending_timestamp, pending_values)
 
@@ -267,6 +429,19 @@ def format_retry_notice(
         f"retry     : {reason}; "
         f"retrying with group-mode={next_plan.group_mode} pmu-slots={next_plan.pmu_slots} "
         f"after {current_plan.group_mode}/{current_plan.pmu_slots}"
+    )
+
+
+def format_group_retry_notice(
+    task: PerfGroupTask,
+    child_groups: tuple[tuple[str, ...], ...],
+    error: PerfStatError,
+) -> str:
+    reason = _summarize_retry_reason(error)
+    children = " | ".join(_describe_group(group) for group in child_groups)
+    return (
+        f"retry     : {reason}; splitting failed group [{_describe_group(task.group)}] "
+        f"into {children}"
     )
 
 
@@ -355,6 +530,41 @@ def _format_unsupported_events(unsupported_events: dict[str, str], diagnostics: 
         f"{rendered}\n{suffix}\n"
         "This often means the current kernel, VM, or permissions model does not expose PMU counters."
     )
+
+
+def _build_group_request(
+    request: ObservationRequest,
+    group: tuple[str, ...],
+) -> ObservationRequest:
+    return ObservationRequest(
+        statement=request.statement,
+        pid=request.pid,
+        comm=request.comm,
+        events=group,
+        interval_ms=request.interval_ms,
+        history_size=request.history_size,
+    )
+
+
+def _plan_group_retry(
+    task: PerfGroupTask,
+    error: PerfStatError,
+    *,
+    retry_grouping: bool,
+) -> tuple[tuple[tuple[str, ...], ...], int] | None:
+    if not retry_grouping or len(task.group) <= 1 or not _is_retryable_grouping_error(error):
+        return None
+
+    next_slots = min(task.pmu_slots, len(task.group) - 1)
+    while next_slots >= 1:
+        child_groups = plan_event_groups(task.group, group_mode="auto", pmu_slots=next_slots)
+        if child_groups != (task.group,):
+            return child_groups, next_slots
+        lowered_slots = _next_lower_slot_limit(next_slots)
+        if lowered_slots is None:
+            break
+        next_slots = lowered_slots
+    return None
 
 
 @lru_cache(maxsize=1)
@@ -535,3 +745,46 @@ def _summarize_retry_reason(error: PerfStatError) -> str:
     if diagnostic_lines:
         return diagnostic_lines[-1]
     return str(error)
+
+
+def _describe_group(group: tuple[str, ...]) -> str:
+    return ", ".join(group)
+
+
+def _add_partial_sample(
+    buckets: list[_PendingSampleBucket],
+    sample: PerfSample,
+    *,
+    tolerance: float,
+) -> None:
+    for bucket in buckets:
+        if abs(bucket.timestamp_sec - sample.timestamp_sec) <= tolerance:
+            bucket.values.update(sample.values)
+            return
+
+    buckets.append(_PendingSampleBucket(sample.timestamp_sec, dict(sample.values)))
+    buckets.sort(key=lambda bucket: bucket.timestamp_sec)
+
+
+def _pop_ready_samples(
+    buckets: list[_PendingSampleBucket],
+    *,
+    newest_timestamp: float,
+    tolerance: float,
+) -> list[PerfSample]:
+    ready: list[PerfSample] = []
+    remaining: list[_PendingSampleBucket] = []
+    cutoff = newest_timestamp - tolerance
+    for bucket in buckets:
+        if bucket.timestamp_sec < cutoff:
+            ready.append(_build_sample(bucket.timestamp_sec, bucket.values))
+        else:
+            remaining.append(bucket)
+    buckets[:] = remaining
+    return ready
+
+
+def _drain_pending_samples(buckets: list[_PendingSampleBucket]) -> list[PerfSample]:
+    drained = [_build_sample(bucket.timestamp_sec, bucket.values) for bucket in buckets]
+    buckets.clear()
+    return drained

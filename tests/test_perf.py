@@ -121,10 +121,10 @@ class PerfHelpersTest(unittest.TestCase):
 
     def test_stream_perf_samples_retries_with_smaller_groups(self) -> None:
         request = ObservationRequest(
-            statement="trace python 4242 inst cycles cache-misses",
+            statement="trace python 4242 inst cycles branches",
             pid=4242,
             comm="python",
-            events=("instructions", "cycles", "cache-references", "cache-misses"),
+            events=("instructions", "cycles", "branches"),
             interval_ms=1000,
             history_size=20,
         )
@@ -134,16 +134,15 @@ class PerfHelpersTest(unittest.TestCase):
             values={
                 "instructions": 1000.0,
                 "cycles": 2000.0,
-                "cache-references": 500.0,
-                "cache-misses": 200.0,
+                "branches": 300.0,
             },
             ipc=0.5,
         )
-        attempts: list[tuple[str, int | None]] = []
+        attempts: list[tuple[str, ...]] = []
 
-        def fake_stream_attempt(request, target, *, group_mode, pmu_slots):
-            attempts.append((group_mode, pmu_slots))
-            if len(attempts) == 1:
+        def fake_stream_attempt(request, target, *, groups=None, stop_event=None):
+            attempts.append(request.events)
+            if request.events == ("instructions", "cycles", "branches"):
                 raise PerfStatError(
                     "uncounted grouped events",
                     kind="unsupported_events",
@@ -155,8 +154,81 @@ class PerfHelpersTest(unittest.TestCase):
         with patch("perf_skill.perf._stream_perf_attempt", side_effect=fake_stream_attempt):
             samples = list(stream_perf_samples(request, target, group_mode="auto", pmu_slots=4))
 
-        self.assertEqual(attempts, [("auto", 4), ("auto", 2)])
+        self.assertEqual(
+            attempts,
+            [
+                ("instructions", "cycles", "branches"),
+                ("instructions", "cycles"),
+                ("branches",),
+            ],
+        )
         self.assertEqual(samples, [sample])
+
+    def test_stream_perf_samples_only_splits_failed_group(self) -> None:
+        request = ObservationRequest(
+            statement="trace python 4242 inst cycles cache-misses",
+            pid=4242,
+            comm="python",
+            events=("instructions", "cycles", "cache-references", "cache-misses"),
+            interval_ms=1000,
+            history_size=20,
+        )
+        target = TargetProcess(pid=4242, comm="python")
+        attempted_groups: list[tuple[str, ...]] = []
+
+        def fake_stream_attempt(request, target, *, groups=None, stop_event=None):
+            attempted_groups.append(request.events)
+            if request.events == ("instructions", "cycles"):
+                return iter([
+                    PerfSample(
+                        timestamp_sec=1.0,
+                        values={"instructions": 1000.0, "cycles": 2000.0},
+                        ipc=0.5,
+                    )
+                ])
+            if request.events == ("cache-references", "cache-misses"):
+                raise PerfStatError(
+                    "uncounted grouped events",
+                    kind="unsupported_events",
+                    diagnostics=("<not counted>",),
+                    unsupported_events={"cache-references": "not counted"},
+                )
+            if request.events == ("cache-references",):
+                return iter([
+                    PerfSample(
+                        timestamp_sec=1.0,
+                        values={"cache-references": 500.0},
+                        ipc=None,
+                    )
+                ])
+            if request.events == ("cache-misses",):
+                return iter([
+                    PerfSample(
+                        timestamp_sec=1.0,
+                        values={"cache-misses": 200.0},
+                        ipc=None,
+                    )
+                ])
+            raise AssertionError(f"unexpected group attempt: {request.events}")
+
+        with patch("perf_skill.perf._stream_perf_attempt", side_effect=fake_stream_attempt):
+            samples = list(stream_perf_samples(request, target, group_mode="auto", pmu_slots=2))
+
+        self.assertEqual(attempted_groups.count(("instructions", "cycles")), 1)
+        self.assertEqual(attempted_groups.count(("cache-references", "cache-misses")), 1)
+        self.assertEqual(attempted_groups.count(("cache-references",)), 1)
+        self.assertEqual(attempted_groups.count(("cache-misses",)), 1)
+        self.assertEqual(len(samples), 1)
+        self.assertEqual(
+            samples[0].values,
+            {
+                "instructions": 1000.0,
+                "cycles": 2000.0,
+                "cache-references": 500.0,
+                "cache-misses": 200.0,
+            },
+        )
+        self.assertEqual(samples[0].ipc, 0.5)
 
 
 if __name__ == "__main__":

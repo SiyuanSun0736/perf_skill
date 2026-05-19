@@ -1,17 +1,40 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "perf-skill"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Declarative Linux PMU observation on top of perf stat"
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [
   { name = "GitHub Copilot" }
 ]
+keywords = ["perf", "pmu", "profiling", "linux", "observability"]
+classifiers = [
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Software Development :: Testing",
+  "Topic :: System :: Monitoring",
+]
 dependencies = []
+
+[project.optional-dependencies]
+dev = [
+  "build>=1.2.2",
+  "twine>=5.1.1",
+]
+
+[project.urls]
+Repository = "https://github.com/SiyuanSun0736/perf_skill"
+Issues = "https://github.com/SiyuanSun0736/perf_skill/issues"
+Releases = "https://github.com/SiyuanSun0736/perf_skill/releases"
 
 [project.scripts]
 perf-skill = "perf_skill.cli:main"
@@ -21,3 +44,6 @@ package-dir = { "" = "src" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.dynamic]
+version = { attr = "perf_skill.__version__" }

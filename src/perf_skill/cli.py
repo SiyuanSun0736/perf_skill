@@ -4,12 +4,38 @@ import argparse
 import shlex
 import sys
 
+from perf_skill import __version__
 from perf_skill.export import CsvSampleWriter, write_svg_report
 from perf_skill.models import ObservationError, PerfSample, PerfStatError
 from perf_skill.parser import build_request
-from perf_skill.perf import build_perf_command, build_retry_plans, detect_pmu_slot_limit, format_retry_notice, format_retry_plan, plan_event_groups, stream_perf_samples
+from perf_skill.perf import build_perf_command, build_retry_plans, detect_pmu_slot_limit, format_retry_plan, plan_event_groups, stream_perf_samples
 from perf_skill.processes import resolve_target
 from perf_skill.ui import DashboardRenderer
+
+
+class HelpFormatter(argparse.ArgumentDefaultsHelpFormatter, argparse.RawDescriptionHelpFormatter):
+        pass
+
+
+ROOT_EPILOG = """Examples:
+    perf-skill observe \"trace pid=4242 inst cycles\" --dry-run
+    perf-skill observe \"trace comm=node branch-misses cache-misses\" --samples 10 --plain
+    perf-skill observe \"trace pid=4242 inst cycles\" --csv-out out/samples.csv --svg-out out/timeline.svg
+
+Use 'perf-skill observe --help' for observe-specific examples and advanced grouping flags.
+"""
+
+
+OBSERVE_EPILOG = """Examples:
+    perf-skill observe \"trace pid=4242 inst cycles\" --dry-run
+    perf-skill observe \"trace pid=4242 branch-misses cache-misses\" --pmu-slots 2
+    perf-skill observe \"trace comm=node inst cycles cache-misses\" --samples 20 --plain --csv-out out/node.csv
+
+Grouping behavior:
+    - auto: keep related counters together and split only failing groups on retry
+    - always: chunk the full event set by PMU slot count
+    - off: disable perf groups entirely
+"""
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -31,12 +57,22 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="perf-skill",
         description="Declarative Linux PMU observation on top of perf stat",
+        epilog=ROOT_EPILOG,
+        formatter_class=HelpFormatter,
     )
-    subparsers = parser.add_subparsers(dest="command")
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__}",
+    )
+    subparsers = parser.add_subparsers(dest="command", metavar="command")
 
     observe_parser = subparsers.add_parser(
         "observe",
         help="parse a statement, resolve a target, and stream perf counters",
+        description="Resolve a pid or comm from a short statement, then sample perf hardware counters with adaptive grouping.",
+        epilog=OBSERVE_EPILOG,
+        formatter_class=HelpFormatter,
     )
     observe_parser.add_argument(
         "statement",
@@ -48,7 +84,7 @@ def _build_parser() -> argparse.ArgumentParser:
     observe_parser.add_argument("--comm", help="explicit process comm override")
     observe_parser.add_argument(
         "--events",
-        help="comma-separated event override such as inst,cycles,cache-misses",
+        help="comma-separated event override such as inst,cycles,cache-misses; missing partner counters are auto-completed",
     )
     observe_parser.add_argument(
         "--interval-ms",
@@ -81,16 +117,16 @@ def _build_parser() -> argparse.ArgumentParser:
         "--group-mode",
         choices=("auto", "always", "off"),
         default="auto",
-        help="event grouping strategy: auto groups related counters, always chunks all counters, off disables grouping",
+        help="event grouping strategy: auto keeps related counters together and retries only failing groups, always chunks the whole set, off disables grouping",
     )
     observe_parser.add_argument(
         "--pmu-slots",
         default="auto",
-        help="PMU slot limit for group splitting; use 'auto' to read local hints and vendor heuristics",
+        help="PMU slot limit for group splitting; use 'auto' to read local hints and vendor heuristics before adaptive retries",
     )
     observe_parser.add_argument(
         "--csv-out",
-        help="write collected samples to a CSV file",
+        help="write collected samples to a CSV file as they arrive",
     )
     observe_parser.add_argument(
         "--svg-out",
@@ -156,7 +192,10 @@ def _handle_observe(args: argparse.Namespace) -> int:
         print(f"group-mode: {args.group_mode}")
         print(f"pmu-slots : {args.pmu_slots} (resolved {resolved_pmu_slots})")
         print(f"groups    : {' | '.join(', '.join(group) for group in event_groups)}")
-        print(f"retries   : {format_retry_plan(retry_plans) if args.group_retry else 'disabled'}")
+        print(
+            f"retrying  : {'split only failed groups' if args.group_retry else 'disabled'}"
+        )
+        print(f"fallbacks : {format_retry_plan(retry_plans) if args.group_retry else 'disabled'}")
         print(f"interval  : {request.interval_ms} ms")
         print(f"command   : {shlex.join(command)}")
         return 0
@@ -212,4 +251,4 @@ def _parse_pmu_slots_arg(raw_value: str) -> int | None:
 
 
 def _emit_retry_notice(current_plan, next_plan, error: PerfStatError) -> None:
-    print(format_retry_notice(current_plan, next_plan, error), file=sys.stderr)
+    print(current_plan, file=sys.stderr)
