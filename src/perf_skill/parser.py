@@ -75,6 +75,11 @@ STOP_TOKENS = {
 PID_KEYS = {"pid", "process-id", "processid", "process_id", "进程", "进程号"}
 COMM_KEYS = {"comm", "name", "cmd", "command", "process-name", "进程名"}
 EVENT_KEYS = {"event", "events", "metric", "metrics", "hw", "硬件事件", "事件"}
+EVENT_FAMILIES: tuple[tuple[str, ...], ...] = (
+    ("instructions", "cycles"),
+    ("branches", "branch-misses"),
+    ("cache-references", "cache-misses"),
+)
 
 
 def build_request(
@@ -183,16 +188,14 @@ def normalize_events(raw_events: tuple[str, ...] | list[str]) -> tuple[str, ...]
 
     if not normalized:
         normalized = ["instructions", "cycles"]
-        seen = {"instructions", "cycles"}
+    else:
+        if "instructions" not in seen:
+            normalized.insert(0, "instructions")
+        if "cycles" not in seen:
+            insert_index = 1 if normalized and normalized[0] == "instructions" else 0
+            normalized.insert(insert_index, "cycles")
 
-    if "instructions" not in seen:
-        normalized.insert(0, "instructions")
-        seen.add("instructions")
-    if "cycles" not in seen:
-        insert_index = 1 if normalized and normalized[0] == "instructions" else 0
-        normalized.insert(insert_index, "cycles")
-
-    return tuple(normalized)
+    return tuple(_expand_event_families(normalized))
 
 
 def normalize_event_name(raw_event: str) -> str | None:
@@ -255,6 +258,22 @@ def _split_event_values(raw_value: str) -> list[str]:
         if normalized_event is not None:
             values.append(normalized_event)
     return values
+
+
+def _expand_event_families(events: list[str]) -> list[str]:
+    expanded = list(events)
+    for family in EVENT_FAMILIES:
+        positions = [expanded.index(event) for event in family if event in expanded]
+        if not positions:
+            continue
+
+        anchor = min(positions)
+        for event in family:
+            if event in expanded:
+                expanded.remove(event)
+        for offset, event in enumerate(family):
+            expanded.insert(anchor + offset, event)
+    return expanded
 
 
 def _parse_pid(raw_value: str) -> int:

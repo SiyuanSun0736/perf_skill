@@ -18,7 +18,7 @@ class PerfHelpersTest(unittest.TestCase):
         )
         target = TargetProcess(pid=4242, comm="python")
 
-        command = build_perf_command(request, target)
+        command = build_perf_command(request, target, pmu_slots=4)
 
         self.assertEqual(
             command,
@@ -48,7 +48,7 @@ class PerfHelpersTest(unittest.TestCase):
         )
         target = TargetProcess(pid=4242, comm="python")
 
-        command = build_perf_command(request, target, group_mode="off")
+        command = build_perf_command(request, target, group_mode="off", pmu_slots=4)
 
         self.assertEqual(command[8], "instructions,cycles,cache-misses")
 
@@ -56,11 +56,35 @@ class PerfHelpersTest(unittest.TestCase):
         groups = plan_event_groups(
             ("instructions", "cycles", "cache-misses", "branches", "branch-misses"),
             group_mode="auto",
+            pmu_slots=4,
         )
 
         self.assertEqual(
             groups,
             (("instructions", "cycles", "cache-misses"), ("branches", "branch-misses")),
+        )
+
+    def test_plan_event_groups_respects_pmu_slots(self) -> None:
+        groups = plan_event_groups(
+            (
+                "instructions",
+                "cycles",
+                "cache-references",
+                "cache-misses",
+                "branches",
+                "branch-misses",
+            ),
+            group_mode="auto",
+            pmu_slots=2,
+        )
+
+        self.assertEqual(
+            groups,
+            (
+                ("instructions", "cycles"),
+                ("branches", "branch-misses"),
+                ("cache-references", "cache-misses"),
+            ),
         )
 
     def test_parse_perf_csv_line(self) -> None:

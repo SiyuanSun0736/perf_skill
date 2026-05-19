@@ -30,9 +30,29 @@ class ParseStatementTest(unittest.TestCase):
             history_size=10,
         )
 
-        self.assertEqual(request.events, ("instructions", "cycles", "cache-misses"))
+        self.assertEqual(
+            request.events,
+            ("instructions", "cycles", "cache-references", "cache-misses"),
+        )
         self.assertEqual(request.interval_ms, 500)
         self.assertEqual(request.history_size, 10)
+
+    def test_parse_statement_completes_event_pairs(self) -> None:
+        pid, comm, events = parse_statement("observe nginx 31337 branch-misses cache-misses")
+
+        self.assertEqual(pid, 31337)
+        self.assertEqual(comm, "nginx")
+        self.assertEqual(
+            events,
+            (
+                "instructions",
+                "cycles",
+                "branches",
+                "branch-misses",
+                "cache-references",
+                "cache-misses",
+            ),
+        )
 
 
 if __name__ == "__main__":

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from functools import lru_cache
+from pathlib import Path
 import subprocess
 from dataclasses import dataclass
 from collections.abc import Iterable, Iterator
@@ -30,6 +32,13 @@ GROUP_FAMILIES: tuple[tuple[str, ...], ...] = (
 )
 GROUP_MODES = {"auto", "always", "off"}
 DEFAULT_GROUP_SIZE = 4
+AMD_DEFAULT_GROUP_SIZE = 6
+PMU_COUNTER_HINT_PATHS = (
+    Path("/sys/bus/event_source/devices/cpu/caps/num_counters"),
+    Path("/sys/bus/event_source/devices/cpu/num_counters"),
+    Path("/sys/bus/event_source/devices/cpu/caps/max_hw_counters"),
+    Path("/sys/devices/cpu/caps/num_counters"),
+)
 
 
 def build_perf_command(
@@ -37,6 +46,7 @@ def build_perf_command(
     target: TargetProcess,
     *,
     group_mode: str = "auto",
+    pmu_slots: int | None = None,
 ) -> list[str]:
     return [
         "perf",
@@ -47,7 +57,7 @@ def build_perf_command(
         "-x",
         ",",
         "-e",
-        build_event_expression(request.events, group_mode=group_mode),
+        build_event_expression(request.events, group_mode=group_mode, pmu_slots=pmu_slots),
         "-p",
         str(target.pid),
     ]
@@ -57,12 +67,11 @@ def plan_event_groups(
     events: Iterable[str],
     *,
     group_mode: str = "auto",
-    max_group_size: int = DEFAULT_GROUP_SIZE,
+    pmu_slots: int | None = None,
 ) -> tuple[tuple[str, ...], ...]:
     ordered_events = tuple(dict.fromkeys(events))
     _validate_group_mode(group_mode)
-    if max_group_size <= 0:
-        raise PerfStatError("group size must be greater than zero")
+    max_group_size = resolve_pmu_slot_limit(pmu_slots)
 
     if not ordered_events:
         return ()
@@ -77,9 +86,9 @@ def build_event_expression(
     events: Iterable[str],
     *,
     group_mode: str = "auto",
-    max_group_size: int = DEFAULT_GROUP_SIZE,
+    pmu_slots: int | None = None,
 ) -> str:
-    groups = plan_event_groups(events, group_mode=group_mode, max_group_size=max_group_size)
+    groups = plan_event_groups(events, group_mode=group_mode, pmu_slots=pmu_slots)
     rendered_groups: list[str] = []
     for group in groups:
         if len(group) == 1:
@@ -94,8 +103,9 @@ def stream_perf_samples(
     target: TargetProcess,
     *,
     group_mode: str = "auto",
+    pmu_slots: int | None = None,
 ) -> Iterator[PerfSample]:
-    command = build_perf_command(request, target, group_mode=group_mode)
+    command = build_perf_command(request, target, group_mode=group_mode, pmu_slots=pmu_slots)
     interval_tolerance = max(request.interval_ms / 1000.0 / 5.0, 0.05)
 
     try:
@@ -245,6 +255,30 @@ def _format_unsupported_events(unsupported_events: dict[str, str], diagnostics: 
     )
 
 
+@lru_cache(maxsize=1)
+def detect_pmu_slot_limit() -> int:
+    for path in PMU_COUNTER_HINT_PATHS:
+        value = _read_positive_int(path)
+        if value is not None:
+            return value
+
+    cpuinfo = _read_cpuinfo_fields()
+    vendor = cpuinfo.get("vendor_id", "")
+    family = _try_parse_int(cpuinfo.get("cpu family"))
+    if vendor == "AuthenticAMD" and family is not None and family >= 23:
+        return AMD_DEFAULT_GROUP_SIZE
+    if vendor == "GenuineIntel":
+        return DEFAULT_GROUP_SIZE
+    return DEFAULT_GROUP_SIZE
+
+
+def resolve_pmu_slot_limit(pmu_slots: int | None) -> int:
+    resolved = detect_pmu_slot_limit() if pmu_slots is None else pmu_slots
+    if resolved <= 0:
+        raise PerfStatError("pmu slot limit must be greater than zero")
+    return resolved
+
+
 def _validate_group_mode(group_mode: str) -> None:
     if group_mode not in GROUP_MODES:
         supported = ", ".join(sorted(GROUP_MODES))
@@ -286,7 +320,8 @@ def _plan_auto_groups(
         else:
             groups.append([event])
 
-    merged_groups = _merge_singleton_groups(groups, max_group_size=max_group_size)
+    split_groups = _split_oversized_groups(groups, max_group_size=max_group_size)
+    merged_groups = _merge_singleton_groups(split_groups, max_group_size=max_group_size)
     return tuple(tuple(group) for group in merged_groups)
 
 
@@ -310,3 +345,54 @@ def _merge_singleton_groups(
             continue
         merged_groups.append(list(group))
     return merged_groups
+
+
+def _split_oversized_groups(
+    groups: list[list[str]],
+    *,
+    max_group_size: int,
+) -> list[list[str]]:
+    split_groups: list[list[str]] = []
+    for group in groups:
+        if len(group) <= max_group_size:
+            split_groups.append(list(group))
+            continue
+        for index in range(0, len(group), max_group_size):
+            split_groups.append(group[index:index + max_group_size])
+    return split_groups
+
+
+def _read_positive_int(path: Path) -> int | None:
+    try:
+        raw_value = path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    parsed = _try_parse_int(raw_value)
+    if parsed is None or parsed <= 0:
+        return None
+    return parsed
+
+
+def _read_cpuinfo_fields(path: Path = Path("/proc/cpuinfo")) -> dict[str, str]:
+    try:
+        contents = path.read_text(encoding="utf-8")
+    except OSError:
+        return {}
+
+    first_block = contents.strip().split("\n\n", maxsplit=1)[0]
+    fields: dict[str, str] = {}
+    for line in first_block.splitlines():
+        if ":" not in line:
+            continue
+        key, value = line.split(":", maxsplit=1)
+        fields[key.strip()] = value.strip()
+    return fields
+
+
+def _try_parse_int(raw_value: str | None) -> int | None:
+    if raw_value is None:
+        return None
+    try:
+        return int(raw_value)
+    except ValueError:
+        return None

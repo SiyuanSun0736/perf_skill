@@ -15,6 +15,8 @@ without manually writing `perf stat` arguments.
 - Delegates to the local `perf-skill` CLI in this repository
 - Supports a dry run to inspect the generated `perf stat` command
 - Supports live sampling with IPC derived from `instructions / cycles`
+- Auto-completes missing event pairs and auto-splits groups against a PMU slot limit
+- Can export CSV and SVG timeline artifacts during sampling
 
 ## When to Use
 
@@ -27,7 +29,7 @@ without manually writing `perf stat` arguments.
 
 1. Take the user's sentence as the observation statement.
 2. If the target is ambiguous or the user wants inspection only, run a dry run first with [run-observe.sh](./scripts/run-observe.sh).
-3. For a real attach, run [run-observe.sh](./scripts/run-observe.sh) with the statement and any needed flags such as `--plain`, `--samples`, or `--dry-run`.
+3. For a real attach, run [run-observe.sh](./scripts/run-observe.sh) with the statement and any needed flags such as `--plain`, `--samples`, `--dry-run`, `--csv-out`, `--svg-out`, or `--pmu-slots`.
 4. Report the resolved target, the events, the generated `perf` command for dry runs, and the resulting IPC for live runs.
 5. If `perf` reports permission, unsupported PMU, or `<not counted>` errors, surface that diagnostic directly.
 
@@ -36,6 +38,7 @@ without manually writing `perf stat` arguments.
 - Prefer `--dry-run` before live attach when the user has not clearly asked to start sampling.
 - Do not silently switch to another process if the requested `pid` or `comm` is invalid.
 - Keep `instructions` and `cycles` in the event set so IPC remains available.
+- Keep paired events together when possible, for example `branches + branch-misses`.
 - Use `python3`; this workspace shell may auto-correct `python` interactively.
 
 ## Examples
@@ -46,4 +49,7 @@ bash .github/skills/hardware-event-observe/scripts/run-observe.sh \
 
 bash .github/skills/hardware-event-observe/scripts/run-observe.sh \
   "observe pid=16874 cache-misses branches" --samples 5 --plain
+
+bash .github/skills/hardware-event-observe/scripts/run-observe.sh \
+  "observe pid=16874 branch-misses" --samples 10 --csv-out out/node.csv --svg-out out/node.svg
 ```
