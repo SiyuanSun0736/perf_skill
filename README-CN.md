@@ -79,7 +79,7 @@ perf-skill observe "生成10s内node的branchs的图像"
 perf-skill observe "追踪 node 的 cycles 并输出 perf.data" --seconds 10
 ```
 
-如果 statement 里明确提到了“火焰图”，或者你显式传了 `--flamegraph-out`，CLI 还会自动切到 `perf record -g`，并在首次使用时把 `https://github.com/brendangregg/FlameGraph.git` clone 到 `~/.openclaw/perf-skill/FlameGraph`，最后输出火焰图 SVG：
+如果 statement 里明确提到了“火焰图”，或者你显式传了 `--flamegraph-out`，CLI 还会自动切到 `perf record -g`，并在首次使用时把 `https://github.com/brendangregg/FlameGraph.git` clone 到当前 `PERF_SKILL_HOME` 下，默认会落到 `~/.openclaw/perf-skill/FlameGraph`，如果 skill 是从 `~/.ironclaw/skills` 或 `~/.zeroclaw/skills` 启动，则会跟随对应 toolkit home，最后输出火焰图 SVG：
 
 ```bash
 perf-skill observe "追踪 node 的 cycles 并生成火焰图" --seconds 10
@@ -491,7 +491,7 @@ python -m unittest discover -s tests
 
 ## IDE 用法
 
-如果你要把这份 skill 安装到另一台 Linux 机器上并实际跑起来，优先看 [docs/guide.md](docs/guide.md)。如果你只关心 Ironclaw 的专用安装步骤，可以直接看 [docs/ironclaw.md](docs/ironclaw.md)。
+如果你要把这份 skill 安装到另一台 Linux 机器上并实际跑起来，优先看 [docs/guide.md](docs/guide.md)。如果你要把它放进 ZeroClaw、IronClaw 或 openclaw 的 skills 目录，先看 [docs/claw-toolkits.md](docs/claw-toolkits.md)。如果你只关心 Ironclaw 的交互命令，可以直接看 [docs/ironclaw.md](docs/ironclaw.md)。
 
 这个仓库还带了一份 Copilot Skill，位置在：
 
@@ -517,4 +517,4 @@ bash .github/skills/hardware-event-observe/scripts/run-observe.sh \
   "trace pid=16874 inst cycles" --samples 5 --plain
 ```
 
-如果脚本能直接看到当前仓库源码，它会以 editable 模式安装这份本地源码，因此仓库里的后续代码修改会直接生效。如果 skill 被安装到当前项目的 `./skills/` 下，它会默认把运行时放到当前项目里的 `./.openclaw/perf-skill/venv`；如果 skill 被安装到全局 `~/.openclaw/skills/` 下，它会默认把运行时放到 `~/.openclaw/perf-skill/venv`。当本地仓库源码不可见时，脚本会改从 skill 自带的 PyPI requirement 安装对应版本的 Python 包；需要覆盖时，可以设置 `PERF_SKILL_PACKAGE_SOURCE`。生成火焰图时，还会在当前 `PERF_SKILL_HOME` 下自动 clone Brendan Gregg 的 FlameGraph 仓库。若要统一改安装位置，可以设置 `OPENCLAW_HOME` 或 `PERF_SKILL_HOME`；如果只想单独改 Python 环境或 FlameGraph 仓库位置，可以分别设置 `PERF_SKILL_VENV_DIR` 和 `PERF_SKILL_FLAMEGRAPH_DIR`。
+如果脚本能直接看到当前仓库源码，它会以 editable 模式安装这份本地源码，因此仓库里的后续代码修改会直接生效。如果 skill 被安装到当前项目的 `./skills/` 下，它会默认把运行时放到当前项目里的 `./.openclaw/perf-skill/venv`；如果 skill 被安装到全局 `~/.openclaw/skills/`、`~/.ironclaw/skills/` 或 `~/.zeroclaw/skills/` 下，它会默认把运行时放到对应 toolkit home 里的 `perf-skill/venv`。当本地仓库源码不可见时，脚本会改从 skill 自带的 PyPI requirement 安装对应版本的 Python 包；需要覆盖时，可以设置 `PERF_SKILL_PACKAGE_SOURCE`。生成火焰图时，还会在当前 `PERF_SKILL_HOME` 下自动 clone Brendan Gregg 的 FlameGraph 仓库。若要统一改安装位置，可以设置 `OPENCLAW_HOME`、`IRONCLAW_HOME`、`ZEROCLAW_HOME` 或 `PERF_SKILL_HOME`；如果只想单独改 Python 环境或 FlameGraph 仓库位置，可以分别设置 `PERF_SKILL_VENV_DIR` 和 `PERF_SKILL_FLAMEGRAPH_DIR`。

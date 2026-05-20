@@ -2,6 +2,8 @@
 
 这份仓库里的 skill 目录在 .github/skills/hardware-event-observe，但 Ironclaw 不会直接扫描这个位置。要在 Ironclaw 里使用它，需要先把 skill 安装到 Ironclaw 自己的 skills 目录，再从当前仓库启动 Ironclaw。
 
+如果你要的是 ZeroClaw / IronClaw / openclaw 三套 toolkit 的统一目录约定、默认 runtime 位置和环境变量别名，直接看 [docs/claw-toolkits.md](docs/claw-toolkits.md)。当前版本开始，Ironclaw 全局安装会默认把运行时放到 `~/.ironclaw/perf-skill/`，不再额外嵌套一层 `.openclaw`。
+
 ## 先决条件
 
 - Linux 环境

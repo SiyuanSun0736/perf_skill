@@ -1,15 +1,30 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
 
-from perf_skill.flamegraph import write_flamegraph
+from perf_skill.flamegraph import resolve_perf_skill_home, write_flamegraph
 
 
 class FlameGraphTest(unittest.TestCase):
+    def test_resolve_perf_skill_home_supports_claw_home_aliases(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+
+            for env_var, home_name in (
+                ("OPENCLAW_HOME", ".openclaw"),
+                ("IRONCLAW_HOME", ".ironclaw"),
+                ("ZEROCLAW_HOME", ".zeroclaw"),
+            ):
+                with self.subTest(env_var=env_var):
+                    tool_home = temp_root / home_name
+                    with patch.dict(os.environ, {env_var: str(tool_home)}, clear=True):
+                        self.assertEqual(resolve_perf_skill_home(), tool_home / "perf-skill")
+
     def test_write_flamegraph_bootstraps_repo_and_writes_svg(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             repo_dir = Path(temp_dir) / "FlameGraph"

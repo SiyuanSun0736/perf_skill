@@ -7,11 +7,19 @@ import subprocess
 from perf_skill.models import ObservationError
 
 FLAMEGRAPH_REPO_URL = "https://github.com/brendangregg/FlameGraph.git"
+CLAW_HOME_ENV_VARS = ("OPENCLAW_HOME", "IRONCLAW_HOME", "ZEROCLAW_HOME")
+
+
+def resolve_claw_home() -> Path:
+    for env_var in CLAW_HOME_ENV_VARS:
+        value = os.environ.get(env_var)
+        if value:
+            return Path(value).expanduser()
+    return Path.home() / ".openclaw"
 
 
 def resolve_perf_skill_home() -> Path:
-    openclaw_home = Path(os.environ.get("OPENCLAW_HOME", str(Path.home() / ".openclaw"))).expanduser()
-    default_home = openclaw_home / "perf-skill"
+    default_home = resolve_claw_home() / "perf-skill"
     return Path(os.environ.get("PERF_SKILL_HOME", str(default_home))).expanduser()
 
 

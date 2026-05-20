@@ -12,7 +12,20 @@ skill_dir="$(dirname -- "$script_dir")"
 skills_dir="$(dirname -- "$skill_dir")"
 package_requirement_file="$skill_dir/package-requirement.txt"
 workspace_root=""
-detected_openclaw_home=""
+detected_claw_home=""
+
+resolve_claw_home_from_env() {
+  local env_var=""
+
+  for env_var in OPENCLAW_HOME IRONCLAW_HOME ZEROCLAW_HOME; do
+    if [[ -n "${!env_var:-}" ]]; then
+      printf '%s\n' "${!env_var}"
+      return 0
+    fi
+  done
+
+  return 1
+}
 
 detect_install_layout() {
   if [[ "$(basename -- "$skills_dir")" != "skills" ]]; then
@@ -25,8 +38,8 @@ detect_install_layout() {
     .github)
       return 0
       ;;
-    .openclaw)
-      detected_openclaw_home="$parent_dir"
+    .openclaw|.ironclaw|.zeroclaw)
+      detected_claw_home="$parent_dir"
       ;;
     *)
       workspace_root="$parent_dir"
@@ -211,18 +224,18 @@ PY
 ensure_python3
 detect_install_layout
 
-openclaw_home="${OPENCLAW_HOME:-}"
-if [[ -z "$openclaw_home" ]]; then
-  if [[ -n "$detected_openclaw_home" ]]; then
-    openclaw_home="$detected_openclaw_home"
+claw_home="$(resolve_claw_home_from_env || true)"
+if [[ -z "$claw_home" ]]; then
+  if [[ -n "$detected_claw_home" ]]; then
+    claw_home="$detected_claw_home"
   elif [[ -n "$workspace_root" ]]; then
-    openclaw_home="$workspace_root/.openclaw"
+    claw_home="$workspace_root/.openclaw"
   else
-    openclaw_home="$HOME/.openclaw"
+    claw_home="$HOME/.openclaw"
   fi
 fi
 
-perf_skill_home="${PERF_SKILL_HOME:-$openclaw_home/perf-skill}"
+perf_skill_home="${PERF_SKILL_HOME:-$claw_home/perf-skill}"
 venv_dir="${PERF_SKILL_VENV_DIR:-$perf_skill_home/venv}"
 venv_python="$venv_dir/bin/python3"
 install_stamp="$perf_skill_home/.install-stamp"
@@ -239,6 +252,7 @@ fi
 run_cwd="$(resolve_run_cwd "$repo_root")"
 cd "$run_cwd"
 ensure_runtime_env "$install_source" "$repo_root"
+export PERF_SKILL_HOME="$perf_skill_home"
 
 subcommand="observe"
 if [[ $# -ge 1 ]]; then

@@ -1,11 +1,13 @@
 # 在其他机器上安装和使用 hardware-event-observe
 
-这份文档说明怎样把本仓库里的 `hardware-event-observe` skill 带到另一台 Linux 机器上，并在 VS Code 或 Ironclaw 里实际跑起来。
+这份文档说明怎样把本仓库里的 `hardware-event-observe` skill 带到另一台 Linux 机器上，并在 VS Code、ZeroClaw、IronClaw 或 openclaw 里实际跑起来。
 
 它覆盖两种用法：
 
 - 方式 A：在 VS Code + GitHub Copilot Chat 里，直接使用仓库内的 workspace skill
-- 方式 B：在 Ironclaw 里，把 skill 复制到 `~/.ironclaw/skills` 后使用
+- 方式 B：在 ZeroClaw / IronClaw / openclaw 里，把 skill 复制到对应的 `~/.<tool>/skills` 后使用
+
+如果你只关心 claw toolkit 的目录映射、默认 runtime 位置和环境变量别名，可以直接看 [docs/claw-toolkits.md](docs/claw-toolkits.md)。下面的方式 B 继续以 Ironclaw 为例。
 
 如果你只是想在另一台机器上直接跑 CLI，而不是通过 skill 触发，也可以看文末的“只安装 CLI”小节。
 
@@ -27,7 +29,7 @@ bash .github/skills/hardware-event-observe/scripts/run-observe.sh ...
 
 - 如果本地能看到仓库源码，就直接使用当前仓库，或者使用你显式设置的 `PERF_SKILL_REPO`
 - 如果 skill 是装在当前工作区的 `./skills/` 下，就把运行时默认放到 `./.openclaw/perf-skill/`
-- 如果 skill 是装在全局 `~/.openclaw/skills/` 下，就把运行时默认放到 `~/.openclaw/perf-skill/`
+- 如果 skill 是装在全局 `~/.openclaw/skills/`、`~/.ironclaw/skills/` 或 `~/.zeroclaw/skills/` 下，就把运行时默认放到对应 toolkit home 里的 `perf-skill/`
 - 找不到本地仓库源码时，会改从 `PERF_SKILL_PACKAGE_SOURCE` 安装 Python 包；默认来源是 skill 自带的 PyPI requirement
 
 这意味着大多数情况下，你不需要先手工执行 `pip install -e .`。只要 `python3 -m venv` 可用，第一次跑 skill 时它会自己把运行时环境补起来；是否走本地源码模式，取决于当前机器上能不能直接看到这个仓库。
@@ -37,18 +39,18 @@ bash .github/skills/hardware-event-observe/scripts/run-observe.sh ...
 这套行为不是靠 `release.yml` 决定的，而是靠“skill 实际被安装到哪里”加上 helper 脚本自己的路径判断实现的。
 
 - 如果 skill 目录在当前项目的 `./skills/hardware-event-observe/` 下，脚本会把这个项目根目录当作当前 workspace，并默认把运行时放到 `./.openclaw/perf-skill/`
-- 如果 skill 目录在 `~/.openclaw/skills/hardware-event-observe/` 下，脚本会把 `~/.openclaw` 当作全局共享根目录，并默认把运行时放到 `~/.openclaw/perf-skill/`
+- 如果 skill 目录在 `~/.openclaw/skills/hardware-event-observe/`、`~/.ironclaw/skills/hardware-event-observe/` 或 `~/.zeroclaw/skills/hardware-event-observe/` 下，脚本会把对应的 toolkit home 当作全局共享根目录，并默认把运行时放到对应 home 里的 `perf-skill/`
 - 如果你直接在本仓库里运行 `.github/skills/hardware-event-observe/` 这份源码版 skill，脚本会优先找到仓库根目录，并以 editable 模式安装本地源码
 
 也就是说：
 
 - Workspace 隔离，靠的是 skill 被安装在当前工作区自己的 `./skills` 下面
-- Global 共享，靠的是 skill 被安装在用户级的 `~/.openclaw/skills` 下面
-- Python 运行时是否隔离，取决于默认的 `OPENCLAW_HOME` 落在哪里；workspace 模式默认是当前项目内的 `./.openclaw`，global 模式默认是 `~/.openclaw`
+- Global 共享，靠的是 skill 被安装在用户级的 `~/.openclaw/skills`、`~/.ironclaw/skills` 或 `~/.zeroclaw/skills` 下面
+- Python 运行时是否隔离，取决于默认的 claw home 落在哪里；workspace 模式默认是当前项目内的 `./.openclaw`，global 模式默认是对应 toolkit 的 home
 
 ## 要不要上架，或者改 release.yml
 
-如果你只是手工复制 skill，或者让 OpenClaw 从某个已知来源把它安装到 `./skills` 或 `~/.openclaw/skills`，不需要改 `release.yml`。
+如果你只是手工复制 skill，或者让某个 claw toolkit 从已知来源把它安装到 `./skills` 或对应的 `~/.<tool>/skills`，不需要改 `release.yml`。
 
 只有下面两类需求，才需要额外的发布动作：
 
@@ -111,7 +113,7 @@ cd perf_skill
 bash .github/skills/hardware-event-observe/scripts/run-observe.sh events branch
 ```
 
-第一次运行时，如果你看到它自动创建 `~/.openclaw/perf-skill/venv`，这是正常行为。
+第一次运行时，如果你看到它自动创建 `~/.openclaw/perf-skill/venv`、`~/.ironclaw/perf-skill/venv` 或 `~/.zeroclaw/perf-skill/venv` 之一，这是正常行为，具体取决于 skill 被装在哪个 toolkit home 下。
 
 如果你是把 skill 装进当前项目的 `./skills/`，那么默认生成的位置会变成当前项目里的 `./.openclaw/perf-skill/venv`。
 
@@ -184,7 +186,7 @@ ironclaw run -m "请使用 hardware-event-observe，先 dry-run：追踪 pid=424
 
 第一次成功执行 skill 时，helper 脚本会自动：
 
-- 按安装位置选择运行时目录：workspace 模式默认是 `./.openclaw/perf-skill/venv`，global 模式默认是 `~/.openclaw/perf-skill/venv`
+- 按安装位置选择运行时目录：workspace 模式默认是 `./.openclaw/perf-skill/venv`，global 模式默认是对应 toolkit home 里的 `perf-skill/venv`，例如 `~/.ironclaw/perf-skill/venv`
 - 能看到本地仓库时，以 editable 模式安装当前仓库；看不到本地仓库时，从 skill 自带的 PyPI requirement 安装对应版本的 Python 包
 - 当你第一次请求 FlameGraph 时，在当前 `PERF_SKILL_HOME` 下 clone FlameGraph
 
@@ -217,11 +219,13 @@ cp -r .github/skills/hardware-event-observe ~/.ironclaw/skills/
 bash .github/skills/hardware-event-observe/scripts/run-observe.sh events branch
 ```
 
-如果你怀疑另一台机器上的自动引导环境已经脏了，可以手工删掉它，让脚本下一次重新创建：
+如果你怀疑另一台机器上的自动引导环境已经脏了，可以手工删掉对应 toolkit home 里的运行时目录，让脚本下一次重新创建。下面先以 Ironclaw 为例：
 
 ```bash
-rm -rf ~/.openclaw/perf-skill/venv
+rm -rf ~/.ironclaw/perf-skill/venv
 ```
+
+如果你走的是 openclaw 或 ZeroClaw，把上面的 `.ironclaw` 改成对应的 home，或者直接删除你显式设置的 `PERF_SKILL_HOME/venv`。
 
 ## 常用验证命令
 
@@ -257,7 +261,7 @@ bash .github/skills/hardware-event-observe/scripts/run-observe.sh \
 如果你要在另一台机器上自定义目录布局，这几个环境变量最有用：
 
 - `PERF_SKILL_REPO`：显式指定本地仓库根目录；只在你要强制走本地源码模式时需要
-- `OPENCLAW_HOME` 或 `PERF_SKILL_HOME`：修改运行时根路径；workspace 模式和 global 模式都会受它影响
+- `OPENCLAW_HOME`、`IRONCLAW_HOME`、`ZEROCLAW_HOME` 或 `PERF_SKILL_HOME`：修改运行时根路径；workspace 模式和 global 模式都会受它影响，其中 `PERF_SKILL_HOME` 优先级最高
 - `PERF_SKILL_VENV_DIR`：只修改自动创建的 Python 虚拟环境路径
 - `PERF_SKILL_FLAMEGRAPH_DIR`：只修改 FlameGraph 仓库路径
 - `PERF_SKILL_PACKAGE_SOURCE`：在没有本地仓库源码时，指定 Python 包安装来源，可以是 PyPI requirement、git URL、wheel、sdist 或本地路径
@@ -269,6 +273,8 @@ export PERF_SKILL_REPO=/srv/perf_skill
 export PERF_SKILL_HOME=/srv/.openclaw/perf-skill
 export PERF_SKILL_PACKAGE_SOURCE='perf-skill==<release-version>'
 ```
+
+如果你只想改某个 toolkit 的 home，而不直接指定完整的 `PERF_SKILL_HOME`，也可以设置 `IRONCLAW_HOME=/srv/.ironclaw`、`OPENCLAW_HOME=/srv/.openclaw` 或 `ZEROCLAW_HOME=/srv/.zeroclaw`。
 
 ## 常见问题
 

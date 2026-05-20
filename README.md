@@ -83,8 +83,10 @@ perf-skill observe "追踪 node 的 cycles 并输出 perf.data" --seconds 10
 
 If the statement asks for a FlameGraph, or if you pass `--flamegraph-out`, the
 CLI also switches to `perf record -g`, bootstraps
-`https://github.com/brendangregg/FlameGraph.git` under
-`~/.openclaw/perf-skill/FlameGraph` on first use, and writes a FlameGraph SVG:
+`https://github.com/brendangregg/FlameGraph.git` under the active
+`PERF_SKILL_HOME` on first use, defaults to `~/.openclaw/perf-skill/FlameGraph`,
+and follows `~/.ironclaw` or `~/.zeroclaw` when the skill is launched from
+those toolkit homes:
 
 ```bash
 perf-skill observe "追踪 node 的 cycles 并生成火焰图" --seconds 10
@@ -516,12 +518,14 @@ If the script can see the local repository checkout, it installs that checkout
 in editable mode so later source changes are picked up immediately. If the
 skill is installed under a workspace `./skills/` directory, it defaults to a
 runtime under `./.openclaw/perf-skill/venv`; if it is installed globally under
-`~/.openclaw/skills/`, it defaults to `~/.openclaw/perf-skill/venv`. When no
-local checkout is visible, it falls back to the pinned PyPI requirement bundled
-with the skill. FlameGraph rendering also auto-clones Brendan Gregg's
-FlameGraph repository under the active `PERF_SKILL_HOME` on first use. You can
-override the shared install path with `OPENCLAW_HOME` or `PERF_SKILL_HOME`, the
-virtual environment path with `PERF_SKILL_VENV_DIR`, the FlameGraph checkout
-path with `PERF_SKILL_FLAMEGRAPH_DIR`, and the fallback Python package source
-with `PERF_SKILL_PACKAGE_SOURCE`.
+`~/.openclaw/skills/`, `~/.ironclaw/skills/`, or `~/.zeroclaw/skills/`, it
+defaults to `perf-skill/venv` under that matching toolkit home. When no local
+checkout is visible, it falls back to the pinned PyPI requirement bundled with
+the skill. FlameGraph rendering also auto-clones Brendan Gregg's FlameGraph
+repository under the active `PERF_SKILL_HOME` on first use. You can override
+the shared install path with `OPENCLAW_HOME`, `IRONCLAW_HOME`,
+`ZEROCLAW_HOME`, or `PERF_SKILL_HOME`, the virtual environment path with
+`PERF_SKILL_VENV_DIR`, the FlameGraph checkout path with
+`PERF_SKILL_FLAMEGRAPH_DIR`, and the fallback Python package source with
+`PERF_SKILL_PACKAGE_SOURCE`.
 
