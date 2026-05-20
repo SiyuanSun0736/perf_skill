@@ -493,6 +493,8 @@ python -m unittest discover -s tests
 
 如果你要把这份 skill 安装到另一台 Linux 机器上并实际跑起来，优先看 [docs/guide.md](docs/guide.md)。如果你要把它放进 ZeroClaw、IronClaw 或 openclaw 的 skills 目录，先看 [docs/claw-toolkits.md](docs/claw-toolkits.md)。如果你只关心 Ironclaw 的交互命令，可以直接看 [docs/ironclaw.md](docs/ironclaw.md)。
 
+当前仓库同时保留了两份同内容的 skill 目录：`skills/hardware-event-observe/` 给 claw 安装命令直接从仓库根扫描时使用，`.github/skills/hardware-event-observe/` 给 VS Code / Copilot Skill 发现机制使用。
+
 这个仓库还带了一份 Copilot Skill，位置在：
 
 ```text

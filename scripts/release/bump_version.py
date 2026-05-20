@@ -12,6 +12,7 @@ PACKAGE_VERSION_PATTERN = re.compile(r'^__version__ = "(?P<version>\d+\.\d+\.\d+
 VERSION_TARGETS = (
     Path("src/perf_skill/__init__.py"),
     Path(".github/skills/hardware-event-observe/package-requirement.txt"),
+    Path("skills/hardware-event-observe/package-requirement.txt"),
     Path("README.md"),
     Path("README-CN.md"),
     Path("docs/local-testing.md"),

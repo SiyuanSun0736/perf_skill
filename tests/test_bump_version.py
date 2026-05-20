@@ -42,6 +42,11 @@ class BumpVersionScriptTest(unittest.TestCase):
         )
         _write_file(
             repo_root,
+            "skills/hardware-event-observe/package-requirement.txt",
+            "perf-skill==0.5.0\n",
+        )
+        _write_file(
+            repo_root,
             "README.md",
             "Pushing a tag such as `v0.5.0`\n"
             "PYTHONPATH=src python3 scripts/release/validate_tag.py v0.5.0\n",
@@ -75,6 +80,7 @@ class BumpVersionScriptTest(unittest.TestCase):
                 {
                     "src/perf_skill/__init__.py",
                     ".github/skills/hardware-event-observe/package-requirement.txt",
+                    "skills/hardware-event-observe/package-requirement.txt",
                     "README.md",
                     "README-CN.md",
                     "docs/local-testing.md",
@@ -83,6 +89,10 @@ class BumpVersionScriptTest(unittest.TestCase):
             self.assertIn('__version__ = "0.6.1"', (repo_root / "src/perf_skill/__init__.py").read_text(encoding="utf-8"))
             self.assertEqual(
                 (repo_root / ".github/skills/hardware-event-observe/package-requirement.txt").read_text(encoding="utf-8"),
+                "perf-skill==0.6.1\n",
+            )
+            self.assertEqual(
+                (repo_root / "skills/hardware-event-observe/package-requirement.txt").read_text(encoding="utf-8"),
                 "perf-skill==0.6.1\n",
             )
             self.assertNotIn("0.5.0", (repo_root / "README.md").read_text(encoding="utf-8"))

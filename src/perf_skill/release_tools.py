@@ -6,10 +6,54 @@ import tomllib
 from pathlib import Path
 
 
-SKILL_PACKAGE_REQUIREMENT_PATH = Path(
-    ".github/skills/hardware-event-observe/package-requirement.txt"
-)
+PRIMARY_SKILL_DIR = Path(".github/skills/hardware-event-observe")
+CLAW_INSTALL_SKILL_DIR = Path("skills/hardware-event-observe")
+SKILL_LAYOUT_DIRS = (PRIMARY_SKILL_DIR, CLAW_INSTALL_SKILL_DIR)
+SKILL_PACKAGE_REQUIREMENT_PATH = PRIMARY_SKILL_DIR / "package-requirement.txt"
 TEST_RELEASE_PREFIX = "test-"
+
+
+def _read_skill_requirement_file(path: Path) -> str | None:
+    if not path.exists():
+        return None
+
+    for line in path.read_text(encoding="utf-8").splitlines():
+        candidate = line.strip()
+        if candidate and not candidate.startswith("#"):
+            return candidate
+    return None
+
+
+def _list_skill_files(skill_dir: Path) -> tuple[Path, ...]:
+    return tuple(sorted(path.relative_to(skill_dir) for path in skill_dir.rglob("*") if path.is_file()))
+
+
+def validate_skill_layout_sync(repo_root: Path) -> tuple[str, ...]:
+    skill_roots = tuple(repo_root / relative_path for relative_path in SKILL_LAYOUT_DIRS)
+    missing_roots = [path for path in skill_roots if not path.exists()]
+    if missing_roots:
+        missing_names = ", ".join(path.relative_to(repo_root).as_posix() for path in missing_roots)
+        raise ValueError(f"missing mirrored skill directory: {missing_names}")
+
+    primary_root, mirror_root = skill_roots
+    primary_files = _list_skill_files(primary_root)
+    mirror_files = _list_skill_files(mirror_root)
+    if primary_files != mirror_files:
+        raise ValueError(
+            "skill file layout differs between "
+            f"{primary_root.relative_to(repo_root).as_posix()} and {mirror_root.relative_to(repo_root).as_posix()}"
+        )
+
+    for relative_path in primary_files:
+        primary_file = primary_root / relative_path
+        mirror_file = mirror_root / relative_path
+        if primary_file.read_bytes() != mirror_file.read_bytes():
+            raise ValueError(
+                "skill file content differs between "
+                f"{primary_file.relative_to(repo_root).as_posix()} and {mirror_file.relative_to(repo_root).as_posix()}"
+            )
+
+    return tuple(path.as_posix() for path in primary_files)
 
 
 def is_test_release_tag(tag_name: str) -> bool:
@@ -36,11 +80,8 @@ def read_skill_package_requirement(repo_root: Path) -> str | None:
     if not requirement_path.exists():
         return None
 
-    for line in requirement_path.read_text(encoding="utf-8").splitlines():
-        candidate = line.strip()
-        if candidate and not candidate.startswith("#"):
-            return candidate
-    return None
+    validate_skill_layout_sync(repo_root)
+    return _read_skill_requirement_file(requirement_path)
 
 
 def validate_skill_package_requirement(repo_root: Path, version: str) -> str:

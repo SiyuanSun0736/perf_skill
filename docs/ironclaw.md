@@ -1,6 +1,6 @@
 # 在 Ironclaw 里使用 hardware-event-observe
 
-这份仓库里的 skill 目录在 .github/skills/hardware-event-observe，但 Ironclaw 不会直接扫描这个位置。要在 Ironclaw 里使用它，需要先把 skill 安装到 Ironclaw 自己的 skills 目录，再从当前仓库启动 Ironclaw。
+这份仓库里的 installer-facing skill 目录在 skills/hardware-event-observe。要在 Ironclaw 里使用它，需要先把这份 skill 安装到 Ironclaw 自己的 skills 目录，再从当前仓库启动 Ironclaw。`.github/skills/hardware-event-observe` 继续保留给 VS Code / Copilot 的 skill 发现机制。
 
 如果你要的是 ZeroClaw / IronClaw / openclaw 三套 toolkit 的统一目录约定、默认 runtime 位置和环境变量别名，直接看 [docs/claw-toolkits.md](docs/claw-toolkits.md)。当前版本开始，Ironclaw 全局安装会默认把运行时放到 `~/.ironclaw/perf-skill/`，不再额外嵌套一层 `.openclaw`。
 
@@ -35,21 +35,21 @@ cd /path/to/perf_skill
 
 ```bash
 mkdir -p ~/.ironclaw/skills
-cp -r .github/skills/hardware-event-observe ~/.ironclaw/skills/
+cp -r skills/hardware-event-observe ~/.ironclaw/skills/
 ironclaw skills info hardware-event-observe
 ```
 
 不要用软链接。当前版本的 Ironclaw 会跳过 ~/.ironclaw/skills 里的符号链接，所以像下面这种方式不会生效：
 
 ```bash
-ln -s "$PWD/.github/skills/hardware-event-observe" ~/.ironclaw/skills/hardware-event-observe
+ln -s "$PWD/skills/hardware-event-observe" ~/.ironclaw/skills/hardware-event-observe
 ```
 
 如果你之前已经装过旧版本，先删除旧目录再复制一遍：
 
 ```bash
 rm -rf ~/.ironclaw/skills/hardware-event-observe
-cp -r .github/skills/hardware-event-observe ~/.ironclaw/skills/
+cp -r skills/hardware-event-observe ~/.ironclaw/skills/
 ```
 
 ## 2. 可选：让 skill 使用本地仓库源码

@@ -498,6 +498,9 @@ This repository also includes a Copilot Skill at
 `.github/skills/hardware-event-observe/` so you can trigger the local CLI from
  VS Code chat with a natural-language request.
 
+For claw installers that scan the repository root directly, the same skill is
+also mirrored at `skills/hardware-event-observe/`.
+
 Example invocations:
 
 ```text

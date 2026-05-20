@@ -13,13 +13,17 @@
 
 ## 先知道这套东西是怎么工作的
 
-这个 skill 的定义在：
+这个仓库里保留了两份同内容的 skill 目录：
 
 ```text
 .github/skills/hardware-event-observe/
+skills/hardware-event-observe/
 ```
 
-skill 实际调用的是这个 helper 脚本：
+- `.github/skills/hardware-event-observe/` 供 VS Code / Copilot 的 workspace skill 发现机制使用
+- `skills/hardware-event-observe/` 供 claw 的安装命令直接从仓库根目录发现 skill 使用
+
+VS Code / Copilot 这一路实际调用的是这个 helper 脚本：
 
 ```bash
 bash .github/skills/hardware-event-observe/scripts/run-observe.sh ...
@@ -145,7 +149,7 @@ cd perf_skill
 ```bash
 mkdir -p ~/.ironclaw/skills
 rm -rf ~/.ironclaw/skills/hardware-event-observe
-cp -r .github/skills/hardware-event-observe ~/.ironclaw/skills/
+cp -r skills/hardware-event-observe ~/.ironclaw/skills/
 ```
 
 不要用软链接。当前版本的 Ironclaw 会跳过 `~/.ironclaw/skills` 下的符号链接。
@@ -210,7 +214,7 @@ git pull
 ```bash
 cd /path/to/perf_skill
 rm -rf ~/.ironclaw/skills/hardware-event-observe
-cp -r .github/skills/hardware-event-observe ~/.ironclaw/skills/
+cp -r skills/hardware-event-observe ~/.ironclaw/skills/
 ```
 
 然后再执行一次任意命令，例如：

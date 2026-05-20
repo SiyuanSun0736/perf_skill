@@ -4,6 +4,11 @@
 
 如果你要看完整的跨机器安装流程，先看 [docs/guide.md](docs/guide.md)。如果你只关心 Ironclaw 的交互命令示例，再看 [docs/ironclaw.md](docs/ironclaw.md)。
 
+当前仓库里有两份同内容的 skill 目录：
+
+- `skills/hardware-event-observe/`：给 ZeroClaw、IronClaw、openclaw 这类安装命令直接扫描仓库根目录时使用
+- `.github/skills/hardware-event-observe/`：给 VS Code / Copilot Skill 发现机制使用
+
 ## 支持的全局目录布局
 
 - ZeroClaw：`~/.zeroclaw/skills/hardware-event-observe`
@@ -35,7 +40,7 @@ cd /path/to/perf_skill
 export CLAW_HOME=~/.ironclaw
 mkdir -p "$CLAW_HOME/skills"
 rm -rf "$CLAW_HOME/skills/hardware-event-observe"
-cp -r .github/skills/hardware-event-observe "$CLAW_HOME/skills/"
+cp -r skills/hardware-event-observe "$CLAW_HOME/skills/"
 ```
 
 如果你要换成 ZeroClaw 或 openclaw，只需要把上面的 `CLAW_HOME` 改成 `~/.zeroclaw` 或 `~/.openclaw`。

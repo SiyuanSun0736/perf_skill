@@ -13,12 +13,25 @@ from perf_skill.release_tools import (
     read_repository_url,
     read_skill_package_requirement,
     render_release_notes,
+    validate_skill_layout_sync,
     validate_skill_package_requirement,
     validate_tag_matches_version,
 )
 
 
 class ReleaseToolsTest(unittest.TestCase):
+    def _write_skill_layout(self, repo_root: Path, requirement_text: str = "perf-skill==0.5.0\n") -> None:
+        skill_files = {
+            "SKILL.md": "---\nname: hardware-event-observe\n---\n",
+            "package-requirement.txt": requirement_text,
+            "scripts/run-observe.sh": "#!/usr/bin/env bash\nexit 0\n",
+        }
+        for base_dir in (".github/skills/hardware-event-observe", "skills/hardware-event-observe"):
+            for relative_path, content in skill_files.items():
+                path = repo_root / base_dir / relative_path
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(content, encoding="utf-8")
+
     def test_normalize_version_tag(self) -> None:
         self.assertEqual(normalize_version_tag("v0.5.0"), "0.5.0")
         self.assertEqual(normalize_version_tag("0.5.0"), "0.5.0")
@@ -86,9 +99,7 @@ Repository = "https://github.com/example/perf_skill"
     def test_read_and_validate_skill_package_requirement(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             repo_root = Path(temp_dir)
-            requirement_path = repo_root / ".github/skills/hardware-event-observe/package-requirement.txt"
-            requirement_path.parent.mkdir(parents=True, exist_ok=True)
-            requirement_path.write_text("perf-skill==0.5.0\n", encoding="utf-8")
+            self._write_skill_layout(repo_root)
 
             self.assertEqual(read_skill_package_requirement(repo_root), "perf-skill==0.5.0")
             self.assertEqual(
@@ -96,9 +107,21 @@ Repository = "https://github.com/example/perf_skill"
                 "perf-skill==0.5.0",
             )
 
+            requirement_path = repo_root / "skills/hardware-event-observe/package-requirement.txt"
             requirement_path.write_text("perf-skill==0.5.1\n", encoding="utf-8")
             with self.assertRaises(ValueError):
                 validate_skill_package_requirement(repo_root, "0.5.0")
+
+    def test_validate_skill_layout_sync_rejects_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo_root = Path(temp_dir)
+            self._write_skill_layout(repo_root)
+
+            mismatch_path = repo_root / "skills/hardware-event-observe/SKILL.md"
+            mismatch_path.write_text("---\nname: drifted\n---\n", encoding="utf-8")
+
+            with self.assertRaises(ValueError):
+                validate_skill_layout_sync(repo_root)
 
 
 if __name__ == "__main__":
