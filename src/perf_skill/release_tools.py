@@ -28,6 +28,14 @@ def _list_skill_files(skill_dir: Path) -> tuple[Path, ...]:
     return tuple(sorted(path.relative_to(skill_dir) for path in skill_dir.rglob("*") if path.is_file()))
 
 
+def _normalized_skill_file_content(path: Path) -> str:
+    text = path.read_text(encoding="utf-8")
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    if normalized.endswith("\n"):
+        return normalized[:-1]
+    return normalized
+
+
 def validate_skill_layout_sync(repo_root: Path) -> tuple[str, ...]:
     skill_roots = tuple(repo_root / relative_path for relative_path in SKILL_LAYOUT_DIRS)
     missing_roots = [path for path in skill_roots if not path.exists()]
@@ -47,7 +55,7 @@ def validate_skill_layout_sync(repo_root: Path) -> tuple[str, ...]:
     for relative_path in primary_files:
         primary_file = primary_root / relative_path
         mirror_file = mirror_root / relative_path
-        if primary_file.read_bytes() != mirror_file.read_bytes():
+        if _normalized_skill_file_content(primary_file) != _normalized_skill_file_content(mirror_file):
             raise ValueError(
                 "skill file content differs between "
                 f"{primary_file.relative_to(repo_root).as_posix()} and {mirror_file.relative_to(repo_root).as_posix()}"

@@ -123,6 +123,18 @@ Repository = "https://github.com/example/perf_skill"
             with self.assertRaises(ValueError):
                 validate_skill_layout_sync(repo_root)
 
+    def test_validate_skill_layout_sync_allows_trailing_newline_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo_root = Path(temp_dir)
+            self._write_skill_layout(repo_root)
+
+            mirror_skill = repo_root / "skills/hardware-event-observe/SKILL.md"
+            mirror_skill.write_text(mirror_skill.read_text(encoding="utf-8").rstrip("\n"), encoding="utf-8")
+
+            synced_files = validate_skill_layout_sync(repo_root)
+
+            self.assertIn("SKILL.md", synced_files)
+
 
 if __name__ == "__main__":
     unittest.main()
