@@ -440,7 +440,7 @@ pip install dist/perf_skill-*.whl
 .github/workflows/release.yml
 ```
 
-推送类似 `v1.0.0` 这样的 tag 时，workflow 会执行：
+推送类似 `v1.0.1` 这样的 tag 时，workflow 会执行：
 
 - 构建 wheel 和 sdist
 - 校验 tag 与 `perf_skill.__version__` 是否一致
@@ -450,8 +450,8 @@ pip install dist/perf_skill-*.whl
 
 现在这条流程支持一条先 TestPyPI、后 PyPI 的两阶段发布路径：
 
-- 先推 `test-v1.0.0`，把构建产物发布到 TestPyPI，创建 GitHub 预发布，并从 TestPyPI 做一次 smoke install。
-- 确认这一步通过后，再在同一个提交上推 `v1.0.0`，创建正式 GitHub Release，发布到 PyPI，并从 PyPI 再做一次 smoke install。
+- 先推 `test-v1.0.1`，把构建产物发布到 TestPyPI，创建 GitHub 预发布，并从 TestPyPI 做一次 smoke install。
+- 确认这一步通过后，再在同一个提交上推 `v1.0.1`，创建正式 GitHub Release，发布到 PyPI，并从 PyPI 再做一次 smoke install。
 
 当前发布流程使用两个辅助脚本：
 
@@ -470,8 +470,8 @@ python3 scripts/release/bump_version.py 0.6.0
 也可以本地手动运行这两个发布脚本：
 
 ```bash
-PYTHONPATH=src python3 scripts/release/validate_tag.py v1.0.0
-PYTHONPATH=src python3 scripts/release/generate_changelog.py --tag v1.0.0 --output /tmp/release-notes.md
+PYTHONPATH=src python3 scripts/release/validate_tag.py v1.0.1
+PYTHONPATH=src python3 scripts/release/generate_changelog.py --tag v1.0.1 --output /tmp/release-notes.md
 ```
 
 ## 注意事项

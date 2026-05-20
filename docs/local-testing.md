@@ -191,16 +191,16 @@ python3 scripts/release/bump_version.py 0.6.0
 校验 tag 和版本号是否一致：
 
 ```bash
-PYTHONPATH=src python3 scripts/release/validate_tag.py v1.0.0
+PYTHONPATH=src python3 scripts/release/validate_tag.py v1.0.1
 ```
 
 生成 changelog：
 
 ```bash
-git tag -f v1.0.0 >/dev/null 2>&1
-PYTHONPATH=src python3 scripts/release/generate_changelog.py --tag v1.0.0 --output /tmp/perf-skill-release-notes.md
+git tag -f v1.0.1 >/dev/null 2>&1
+PYTHONPATH=src python3 scripts/release/generate_changelog.py --tag v1.0.1 --output /tmp/perf-skill-release-notes.md
 sed -n '1,40p' /tmp/perf-skill-release-notes.md
-git tag -d v1.0.0 >/dev/null 2>&1
+git tag -d v1.0.1 >/dev/null 2>&1
 ```
 
 ## 8. 验证本地打包
@@ -217,8 +217,8 @@ ls -1 dist
 
 正常情况下会看到类似下面两个产物：
 
-- `perf_skill-1.0.0.tar.gz`
-- `perf_skill-1.0.0-py3-none-any.whl`
+- `perf_skill-1.0.1.tar.gz`
+- `perf_skill-1.0.1-py3-none-any.whl`
 
 测试结束后可以清理：
 

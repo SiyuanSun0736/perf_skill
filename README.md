@@ -441,15 +441,15 @@ pip install dist/perf_skill-*.whl
 ```
 
 This repository includes a tag-driven GitHub Actions workflow at
-`.github/workflows/release.yml`. Pushing a tag such as `v1.0.0` builds the wheel
+`.github/workflows/release.yml`. Pushing a tag such as `v1.0.1` builds the wheel
 and sdist, validates that the tag matches the package version, generates a
 changelog from commits since the previous tag, uploads the built artifacts, and
 attaches them to a GitHub release.
 
 The workflow now supports a two-stage publish path:
 
-- Push `test-v1.0.0` to publish the build to TestPyPI, create a GitHub prerelease, and run a smoke-install from TestPyPI.
-- After that succeeds, push `v1.0.0` on the same commit to create the formal GitHub release, publish to PyPI, and run a smoke-install from PyPI.
+- Push `test-v1.0.1` to publish the build to TestPyPI, create a GitHub prerelease, and run a smoke-install from TestPyPI.
+- After that succeeds, push `v1.0.1` on the same commit to create the formal GitHub release, publish to PyPI, and run a smoke-install from PyPI.
 
 The release workflow uses:
 
@@ -473,8 +473,8 @@ checkout is available.
 You can also run the release helpers locally:
 
 ```bash
-PYTHONPATH=src python3 scripts/release/validate_tag.py v1.0.0
-PYTHONPATH=src python3 scripts/release/generate_changelog.py --tag v1.0.0 --output /tmp/release-notes.md
+PYTHONPATH=src python3 scripts/release/validate_tag.py v1.0.1
+PYTHONPATH=src python3 scripts/release/generate_changelog.py --tag v1.0.1 --output /tmp/release-notes.md
 ```
 
 ## Notes
