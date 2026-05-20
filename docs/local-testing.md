@@ -239,8 +239,8 @@ sed -n '1,240p' .github/workflows/release.yml
 - 构建 `python -m build`
 - 版本校验 `scripts/release/validate_tag.py`
 - changelog 生成 `scripts/release/generate_changelog.py`
-- GitHub Release 上传
-- 可选的 PyPI 发布 job
+- `test-vX.Y.Z` 触发的 TestPyPI 发布和 smoke install job
+- `vX.Y.Z` 触发的 GitHub Release、PyPI 发布和 smoke install job
 
 ## 10. 常用回归命令清单
 

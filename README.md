@@ -444,6 +444,11 @@ and sdist, validates that the tag matches the package version, generates a
 changelog from commits since the previous tag, uploads the built artifacts, and
 attaches them to a GitHub release.
 
+The workflow now supports a two-stage publish path:
+
+- Push `test-v1.0.0` to publish the build to TestPyPI, create a GitHub prerelease, and run a smoke-install from TestPyPI.
+- After that succeeds, push `v1.0.0` on the same commit to create the formal GitHub release, publish to PyPI, and run a smoke-install from PyPI.
+
 The release workflow uses:
 
 - `scripts/release/validate_tag.py` to assert `vX.Y.Z` matches `perf_skill.__version__`
@@ -456,9 +461,12 @@ python3 scripts/release/bump_version.py 0.6.0 --dry-run
 python3 scripts/release/bump_version.py 0.6.0
 ```
 
-To enable PyPI publishing, configure a trusted publisher for this repository on
-PyPI and set the repository variable `PUBLISH_PYPI=true`. The workflow will then
-publish the same `dist/` artifacts to PyPI after a tagged release build.
+Configure trusted publishers for this repository on both TestPyPI and PyPI
+before pushing release tags. `test-vX.Y.Z` tags publish to TestPyPI first, and
+`vX.Y.Z` tags publish the same version to PyPI after the rehearsal is complete.
+The skill's bundled `.github/skills/hardware-event-observe/package-requirement.txt`
+keeps the runtime installer pinned to that released PyPI version when no local
+checkout is available.
 
 You can also run the release helpers locally:
 
@@ -504,13 +512,16 @@ bash .github/skills/hardware-event-observe/scripts/run-observe.sh \
 	"trace pid=16874 inst cycles" --samples 5 --plain
 ```
 
-The script keeps the invocation inside this repository and uses `python3` with
-an auto-bootstrapped virtual environment under `~/.openclaw/perf-skill/venv`.
-On the first run, it creates that environment and installs this repository in
-editable mode with its Python dependencies. FlameGraph rendering also
-auto-clones Brendan Gregg's FlameGraph repository under
-`~/.openclaw/perf-skill/FlameGraph` on first use. You can override the shared
-install path with `OPENCLAW_HOME` or `PERF_SKILL_HOME`, the virtual environment
-path with `PERF_SKILL_VENV_DIR`, and the FlameGraph checkout path with
-`PERF_SKILL_FLAMEGRAPH_DIR`.
+If the script can see the local repository checkout, it installs that checkout
+in editable mode so later source changes are picked up immediately. If the
+skill is installed under a workspace `./skills/` directory, it defaults to a
+runtime under `./.openclaw/perf-skill/venv`; if it is installed globally under
+`~/.openclaw/skills/`, it defaults to `~/.openclaw/perf-skill/venv`. When no
+local checkout is visible, it falls back to the pinned PyPI requirement bundled
+with the skill. FlameGraph rendering also auto-clones Brendan Gregg's
+FlameGraph repository under the active `PERF_SKILL_HOME` on first use. You can
+override the shared install path with `OPENCLAW_HOME` or `PERF_SKILL_HOME`, the
+virtual environment path with `PERF_SKILL_VENV_DIR`, the FlameGraph checkout
+path with `PERF_SKILL_FLAMEGRAPH_DIR`, and the fallback Python package source
+with `PERF_SKILL_PACKAGE_SOURCE`.
 

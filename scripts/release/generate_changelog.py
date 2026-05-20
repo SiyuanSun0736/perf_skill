@@ -14,7 +14,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Generate release changelog markdown from git history between tags.",
     )
-    parser.add_argument("--tag", required=True, help="current tag, such as v0.5.0")
+    parser.add_argument("--tag", required=True, help="current tag, such as v0.5.0 or test-v0.5.0")
     parser.add_argument("--previous-tag", help="optional explicit previous tag")
     parser.add_argument("--output", help="optional file path to write the changelog to")
     args = parser.parse_args(argv)

@@ -6,7 +6,19 @@ import tomllib
 from pathlib import Path
 
 
+SKILL_PACKAGE_REQUIREMENT_PATH = Path(
+    ".github/skills/hardware-event-observe/package-requirement.txt"
+)
+TEST_RELEASE_PREFIX = "test-"
+
+
+def is_test_release_tag(tag_name: str) -> bool:
+    return tag_name.startswith(TEST_RELEASE_PREFIX)
+
+
 def normalize_version_tag(tag_name: str) -> str:
+    if is_test_release_tag(tag_name):
+        tag_name = tag_name[len(TEST_RELEASE_PREFIX):]
     return tag_name[1:] if tag_name.startswith("v") else tag_name
 
 
@@ -17,6 +29,34 @@ def validate_tag_matches_version(tag_name: str, version: str) -> str:
             f"tag {tag_name} does not match package version {version}"
         )
     return normalized_tag
+
+
+def read_skill_package_requirement(repo_root: Path) -> str | None:
+    requirement_path = repo_root / SKILL_PACKAGE_REQUIREMENT_PATH
+    if not requirement_path.exists():
+        return None
+
+    for line in requirement_path.read_text(encoding="utf-8").splitlines():
+        candidate = line.strip()
+        if candidate and not candidate.startswith("#"):
+            return candidate
+    return None
+
+
+def validate_skill_package_requirement(repo_root: Path, version: str) -> str:
+    requirement = read_skill_package_requirement(repo_root)
+    expected_requirement = f"perf-skill=={version}"
+    requirement_path = repo_root / SKILL_PACKAGE_REQUIREMENT_PATH
+
+    if requirement is None:
+        raise ValueError(f"missing skill package requirement in {requirement_path}")
+
+    if requirement != expected_requirement:
+        raise ValueError(
+            f"skill package requirement {requirement!r} does not match expected {expected_requirement!r}"
+        )
+
+    return requirement
 
 
 def read_repository_url(repo_root: Path) -> str | None:
@@ -45,6 +85,8 @@ def list_tags(repo_root: Path) -> tuple[str, ...]:
 def find_previous_tag(tags: tuple[str, ...], current_tag: str) -> str | None:
     for tag in tags:
         if tag != current_tag:
+            if is_test_release_tag(tag):
+                continue
             return tag
     return None
 

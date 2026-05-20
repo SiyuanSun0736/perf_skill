@@ -12,19 +12,21 @@ def _repo_root() -> Path:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Validate that a git tag matches perf_skill.__version__.",
+        description="Validate that a git tag and bundled skill runtime requirement match perf_skill.__version__.",
     )
-    parser.add_argument("tag", help="tag to validate, such as v0.5.0")
+    parser.add_argument("tag", help="tag to validate, such as v0.5.0 or test-v0.5.0")
     args = parser.parse_args(argv)
 
     repo_root = _repo_root()
     sys.path.insert(0, str(repo_root / "src"))
 
     from perf_skill import __version__
-    from perf_skill.release_tools import validate_tag_matches_version
+    from perf_skill.release_tools import validate_skill_package_requirement, validate_tag_matches_version
 
     normalized_version = validate_tag_matches_version(args.tag, __version__)
+    requirement = validate_skill_package_requirement(repo_root, normalized_version)
     print(f"validated tag {args.tag} against package version {normalized_version}")
+    print(f"validated skill runtime package requirement {requirement}")
     return 0
 
 

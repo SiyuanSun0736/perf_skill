@@ -448,6 +448,11 @@ pip install dist/perf_skill-*.whl
 - 上传构建产物
 - 创建 GitHub Release 并附带构建产物
 
+现在这条流程支持一条先 TestPyPI、后 PyPI 的两阶段发布路径：
+
+- 先推 `test-v1.0.0`，把构建产物发布到 TestPyPI，创建 GitHub 预发布，并从 TestPyPI 做一次 smoke install。
+- 确认这一步通过后，再在同一个提交上推 `v1.0.0`，创建正式 GitHub Release，发布到 PyPI，并从 PyPI 再做一次 smoke install。
+
 当前发布流程使用两个辅助脚本：
 
 - `scripts/release/validate_tag.py`：校验 `vX.Y.Z` 与包版本一致
@@ -460,13 +465,7 @@ python3 scripts/release/bump_version.py 0.6.0 --dry-run
 python3 scripts/release/bump_version.py 0.6.0
 ```
 
-如果你想开启 PyPI 发布，需要先在 PyPI 上把这个仓库配置成 trusted publisher，并设置仓库变量：
-
-```text
-PUBLISH_PYPI=true
-```
-
-配置完成后，tag 构建会在 GitHub Release 之后继续把相同的 `dist/` 产物发布到 PyPI。
+如果你要启用这条两阶段发布链，需要分别在 TestPyPI 和 PyPI 上把这个仓库配置成 trusted publisher。配置完成后，`test-vX.Y.Z` 会先走 TestPyPI 预发布验证，`vX.Y.Z` 再走正式 PyPI 发布；同时 skill 自带的 `.github/skills/hardware-event-observe/package-requirement.txt` 会把无源码场景下的运行时安装固定到正式 release 对应的 PyPI 版本。
 
 也可以本地手动运行这两个发布脚本：
 
@@ -492,6 +491,8 @@ python -m unittest discover -s tests
 
 ## IDE 用法
 
+如果你要把这份 skill 安装到另一台 Linux 机器上并实际跑起来，优先看 [docs/guide.md](docs/guide.md)。如果你只关心 Ironclaw 的专用安装步骤，可以直接看 [docs/ironclaw.md](docs/ironclaw.md)。
+
 这个仓库还带了一份 Copilot Skill，位置在：
 
 ```text
@@ -516,4 +517,4 @@ bash .github/skills/hardware-event-observe/scripts/run-observe.sh \
   "trace pid=16874 inst cycles" --samples 5 --plain
 ```
 
-脚本会确保调用发生在当前仓库根目录下，并在首次运行时自动把运行环境安装到 `~/.openclaw/perf-skill/venv`。它会以 editable 模式安装当前仓库和所需 Python 依赖，因此仓库里的后续代码修改会直接生效。生成火焰图时，还会在首次使用时把 Brendan Gregg 的 FlameGraph 仓库 clone 到 `~/.openclaw/perf-skill/FlameGraph`。如果你需要统一改安装位置，可以设置 `OPENCLAW_HOME` 或 `PERF_SKILL_HOME`；如果只想单独改 Python 环境或 FlameGraph 仓库位置，可以分别设置 `PERF_SKILL_VENV_DIR` 和 `PERF_SKILL_FLAMEGRAPH_DIR`。
+如果脚本能直接看到当前仓库源码，它会以 editable 模式安装这份本地源码，因此仓库里的后续代码修改会直接生效。如果 skill 被安装到当前项目的 `./skills/` 下，它会默认把运行时放到当前项目里的 `./.openclaw/perf-skill/venv`；如果 skill 被安装到全局 `~/.openclaw/skills/` 下，它会默认把运行时放到 `~/.openclaw/perf-skill/venv`。当本地仓库源码不可见时，脚本会改从 skill 自带的 PyPI requirement 安装对应版本的 Python 包；需要覆盖时，可以设置 `PERF_SKILL_PACKAGE_SOURCE`。生成火焰图时，还会在当前 `PERF_SKILL_HOME` 下自动 clone Brendan Gregg 的 FlameGraph 仓库。若要统一改安装位置，可以设置 `OPENCLAW_HOME` 或 `PERF_SKILL_HOME`；如果只想单独改 Python 环境或 FlameGraph 仓库位置，可以分别设置 `PERF_SKILL_VENV_DIR` 和 `PERF_SKILL_FLAMEGRAPH_DIR`。

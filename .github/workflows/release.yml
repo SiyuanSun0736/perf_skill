@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - "v*"
+      - "test-v*"
   workflow_dispatch:
 
 permissions:
@@ -11,12 +12,34 @@ permissions:
 
 jobs:
   build:
+    outputs:
+      package-version: ${{ steps.release-meta.outputs.package-version }}
+      release-channel: ${{ steps.release-meta.outputs.release-channel }}
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Classify release tag
+        if: startsWith(github.ref, 'refs/tags/')
+        id: release-meta
+        run: |
+          case "${GITHUB_REF_NAME}" in
+            test-v*)
+              echo "package-version=${GITHUB_REF_NAME#test-v}" >> "$GITHUB_OUTPUT"
+              echo "release-channel=testpypi" >> "$GITHUB_OUTPUT"
+              ;;
+            v*)
+              echo "package-version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+              echo "release-channel=pypi" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "unsupported tag format: ${GITHUB_REF_NAME}" >&2
+              exit 2
+              ;;
+          esac
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -54,11 +77,66 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
+          name: ${{ github.ref_name }}
           files: dist/*
           body_path: release-notes.md
+          prerelease: ${{ startsWith(github.ref_name, 'test-v') }}
+
+  publish-testpypi:
+    if: startsWith(github.ref, 'refs/tags/test-v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    steps:
+      - name: Download dist artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      - name: Publish to TestPyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          packages-dir: dist
+          skip-existing: true
+
+  verify-testpypi-install:
+    if: startsWith(github.ref, 'refs/tags/test-v')
+    needs:
+      - build
+      - publish-testpypi
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Smoke test package from TestPyPI
+        env:
+          PACKAGE_VERSION: ${{ needs.build.outputs.package-version }}
+        run: |
+          python -m pip install --upgrade pip
+          for attempt in 1 2 3 4 5 6; do
+            if python -m pip install \
+              --no-cache-dir \
+              --index-url https://test.pypi.org/simple/ \
+              --extra-index-url https://pypi.org/simple/ \
+              "perf-skill==${PACKAGE_VERSION}"; then
+              perf-skill --version
+              exit 0
+            fi
+            if [[ "$attempt" -eq 6 ]]; then
+              exit 1
+            fi
+            echo "waiting for TestPyPI propagation (attempt ${attempt})" >&2
+            sleep 15
+          done
 
   publish-pypi:
-    if: startsWith(github.ref, 'refs/tags/') && vars.PUBLISH_PYPI == 'true'
+    if: startsWith(github.ref, 'refs/tags/v')
     needs: build
     runs-on: ubuntu-latest
     permissions:
@@ -77,3 +155,33 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist
+          skip-existing: true
+
+  verify-pypi-install:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs:
+      - build
+      - publish-pypi
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Smoke test package from PyPI
+        env:
+          PACKAGE_VERSION: ${{ needs.build.outputs.package-version }}
+        run: |
+          python -m pip install --upgrade pip
+          for attempt in 1 2 3 4 5 6; do
+            if python -m pip install --no-cache-dir "perf-skill==${PACKAGE_VERSION}"; then
+              perf-skill --version
+              exit 0
+            fi
+            if [[ "$attempt" -eq 6 ]]; then
+              exit 1
+            fi
+            echo "waiting for PyPI propagation (attempt ${attempt})" >&2
+            sleep 15
+          done

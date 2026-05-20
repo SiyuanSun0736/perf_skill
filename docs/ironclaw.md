@@ -50,33 +50,39 @@ rm -rf ~/.ironclaw/skills/hardware-event-observe
 cp -r .github/skills/hardware-event-observe ~/.ironclaw/skills/
 ```
 
-## 2. 让 skill 能找到当前仓库
+## 2. 可选：让 skill 使用本地仓库源码
 
-因为 Ironclaw 会把 skill 放在 ~/.ironclaw/skills 下运行，而不是直接在仓库里运行，所以最稳妥的方式是先告诉脚本仓库根目录在哪里：
+因为 Ironclaw 会把 skill 放在 ~/.ironclaw/skills 下运行，而不是直接在仓库里运行，所以“使用本地源码 checkout”现在是一个显式可选项，而不是必需项：
 
 ```bash
 cd /path/to/perf_skill
 export PERF_SKILL_REPO="$PWD"
 ```
 
-如果你总是从仓库根目录启动 ironclaw run，这个 skill 现在也能直接使用当前工作目录定位源码；但显式设置 PERF_SKILL_REPO 更稳定。
+现在有两种模式：
+
+- 直接运行：不设置 `PERF_SKILL_REPO` 也可以。脚本会自动创建运行时环境，并从默认包来源安装 `perf-skill`
+- 本地源码开发：如果你希望 Ironclaw 明确跑当前机器上的仓库源码，再设置 `PERF_SKILL_REPO`
 
 ## 3. 启动 Ironclaw
 
 交互模式：
 
 ```bash
-cd /path/to/perf_skill
-export PERF_SKILL_REPO="$PWD"
 ironclaw run
 ```
 
 单条消息模式：
 
 ```bash
+ironclaw run -m "追踪 comm=node pid=16874 的 inst 和 cycles，先 dry-run" --auto-approve
+```
+
+如果你要强制走本地源码模式，再在上面两条命令前加：
+
+```bash
 cd /path/to/perf_skill
 export PERF_SKILL_REPO="$PWD"
-ironclaw run -m "追踪 comm=node pid=16874 的 inst 和 cycles，先 dry-run" --auto-approve
 ```
 
 ## 4. 怎么触发这个 skill
@@ -134,14 +140,14 @@ python3 -m pip install -e .
 
 ### 运行时报 No module named perf_skill
 
-先回到仓库根目录，再设置：
+如果你想强制让 skill 使用本地源码，先回到仓库根目录，再设置：
 
 ```bash
 cd /path/to/perf_skill
 export PERF_SKILL_REPO="$PWD"
 ```
 
-如果你不想依赖源码路径，也可以直接把包安装到当前 Python 环境：
+如果你不想依赖源码路径，也可以让脚本自己自动引导，或者直接把包安装到当前 Python 环境：
 
 ```bash
 cd /path/to/perf_skill

@@ -95,7 +95,7 @@ or post-run analysis.
 - Can run `perf-skill exercise` with `stress-ng` or `ab` to create a load-and-observe loop
 - Can list available events through the explicit `perf-skill events` subcommand, for example `perf-skill events branch` or `perf-skill events cache`
 - Can start from a broad event-family listing, filter that list down to a portable shortlist, and then continue into collection without asking the user to assemble the final command
-- Automatically bootstraps a dedicated Python runtime under `~/.openclaw/perf-skill/venv` on machines that do not already have the environment prepared
+- Automatically bootstraps a dedicated Python runtime under the current workspace at `./.openclaw/perf-skill/venv` when the skill is installed into `./skills`, or under `~/.openclaw/perf-skill/venv` when the skill is installed globally
 - Automatically bootstraps Brendan Gregg's FlameGraph repository under `~/.openclaw/perf-skill/FlameGraph` on first FlameGraph use
 - Auto-completes missing event pairs and auto-splits groups against a PMU slot limit
 - In auto mode, prefers grouping event names that share a prefix, suffix, or namespace when there is a choice
@@ -135,11 +135,14 @@ or post-run analysis.
 
 ## Runtime bootstrap
 
-- The helper script auto-creates a virtual environment in `~/.openclaw/perf-skill/venv` the first time it runs.
-- It installs the local repository in editable mode, so later source changes in this repo are picked up without rebuilding the environment.
-- FlameGraph rendering auto-clones Brendan Gregg's FlameGraph repository into `~/.openclaw/perf-skill/FlameGraph` the first time it is needed.
-- If `pyproject.toml` changes or the environment is missing dependencies, the helper reinstalls automatically on the next run.
-- Override the default location with `OPENCLAW_HOME` or `PERF_SKILL_HOME` when a different shared path is required; override just the Python venv with `PERF_SKILL_VENV_DIR` or just the FlameGraph checkout with `PERF_SKILL_FLAMEGRAPH_DIR`.
+- The helper script auto-creates a virtual environment the first time it runs.
+- If the skill lives under `./skills`, it treats that directory's parent as the active workspace and uses `./.openclaw/perf-skill/venv` by default.
+- If the skill lives under `~/.openclaw/skills`, it uses `~/.openclaw/perf-skill/venv` by default.
+- If a local repository checkout is available, it installs that checkout in editable mode so later source changes are picked up without rebuilding the environment.
+- If no local checkout is available, it installs `perf-skill` from `PERF_SKILL_PACKAGE_SOURCE`, which defaults to the skill-bundled PyPI requirement in `package-requirement.txt`.
+- FlameGraph rendering auto-clones Brendan Gregg's FlameGraph repository into the active `PERF_SKILL_HOME` on first use.
+- If `pyproject.toml`, `SKILL.md`, or the helper script changes, or if the environment is missing dependencies, the helper reinstalls automatically on the next run.
+- Override the default location with `OPENCLAW_HOME` or `PERF_SKILL_HOME` when a different shared path is required; override just the Python venv with `PERF_SKILL_VENV_DIR`, the FlameGraph checkout with `PERF_SKILL_FLAMEGRAPH_DIR`, or the Python package source with `PERF_SKILL_PACKAGE_SOURCE`.
 - The machine still needs a working `python3 -m venv`; if that fails, install the system venv package first.
 
 ## Guardrails
